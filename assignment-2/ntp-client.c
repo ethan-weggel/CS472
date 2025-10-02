@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
     
     // Parse command line arguments
     int opt;
-    while ((opt = getopt(argc, argv, "s:hd")) != -1) {
+    while ((opt = getopt(argc, argv, "s:hde")) != -1) {
         switch (opt) {
             case 's':
                 ntp_server = optarg;
@@ -68,6 +68,14 @@ int main(int argc, char* argv[]) {
                 demonstrate_epoch_conversion();
                 printf("\n");
                 break;
+            case 'e':
+                ntp_timestamp_t* ntp_timestamp = (ntp_timestamp_t*) malloc(sizeof(ntp_timestamp_t));
+                get_current_ntp_time(ntp_timestamp);
+                char buff[64];
+                ntp_time_to_string(ntp_timestamp, buff, sizeof(buff), 1);
+                puts(buff);
+                free(ntp_timestamp);
+                return RC_OK;
             case 'h':
                 usage(argv[0]);
                 return 0;
@@ -334,11 +342,33 @@ void demonstrate_epoch_conversion(void) {
  * DEBUGGING TIP:
  * Use demonstrate_epoch_conversion() to verify your conversion logic
  */
+
+//  typedef struct {
+//     uint32_t seconds;    // Seconds since NTP epoch (1900-01-01)
+//     uint32_t fraction;   // Fractional seconds in 1/2^32 increments
+// } __attribute__((packed)) ntp_timestamp_t;
+
 void get_current_ntp_time(ntp_timestamp_t *ntp_ts){
-    printf("get_current_ntp_time() - TO BE IMPLEMENTED\n");
-    // TODO: Implement this function
-    // Hint: Use gettimeofday(), convert epoch, scale microseconds
     memset(ntp_ts, 0, sizeof(ntp_timestamp_t));
+
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) == -1) {
+        perror("Error during gettimeofday()");
+    }
+
+    uint64_t modified_seconds = tv.tv_sec;
+    uint64_t modified_useconds = tv.tv_usec;
+
+    modified_seconds += NTP_EPOCH_OFFSET;
+    modified_useconds *= NTP_FRACTION_SCALE;
+    modified_useconds /= USEC_INCREMENTS;
+
+    // printf("%ld.%06ld\n", (long)tv.tv_sec, (long)tv.tv_usec);
+
+    ntp_ts->seconds = modified_seconds;
+    ntp_ts->fraction = modified_useconds;
+
+    // printf("%ld.%06ld\n", (long)ntp_ts->seconds, (long)ntp_ts->fraction);
 }
 
 //STUDENT TODO
@@ -367,10 +397,19 @@ void get_current_ntp_time(ntp_timestamp_t *ntp_ts){
  * If conversion fails, use snprintf to write "INVALID_TIME" to buffer
  */
 void ntp_time_to_string(const ntp_timestamp_t *ntp_ts, char *buffer, size_t buffer_size, int local) {
-    printf("ntp_time_to_string() - TO BE IMPLEMENTED\n");
     // TODO: Implement this function
     // Hint: Convert NTP to Unix time, use localtime/gmtime, format with snprintf
-    snprintf(buffer, buffer_size, "TO BE IMPLEMENTED");
+    // snprintf(buffer, buffer_size, "TO BE IMPLEMENTED");
+
+    time_t t = (time_t)(ntp_ts->seconds - NTP_EPOCH_OFFSET);
+
+    uint32_t ntp_fraction = ntp_ts->fraction;
+    uint64_t ntp_frac_conversion = ntp_fraction * USEC_INCREMENTS;
+    uint32_t unix_fraction = ntp_frac_conversion / NTP_FRACTION_SCALE;
+    unsigned usec = unix_fraction;
+    
+    struct tm *tmv = local ? localtime(&t) : gmtime(&t);
+    snprintf(buffer, buffer_size, "%04d-%02d-%02d %02d:%02d:%02d.%06u", tmv->tm_year + NTP_EPOCH_YEAR, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, usec);
 }
 
 //STUDENT TODO
