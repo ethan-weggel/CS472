@@ -260,7 +260,7 @@ typedef struct {
 // upper 16 bits are seconds, and the lower 16 bits are fractions
 // of a second, here are helpers to decode Q16.16 encoded numbers
 #define GET_NTP_Q1616_SEC(d) (d >> 16)
-#define GET_NTP_Q1616_FRAC(d) (d & 0xFFFF0000)
+#define GET_NTP_Q1616_FRAC(d) (d & 0x0000FFFF)
 // Returns a double number in seconds
 #define GET_NTP_Q1616_TS(d) ( \
     (double)((GET_NTP_Q1616_SEC(d) * 1000) + \
