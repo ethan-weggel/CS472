@@ -69,11 +69,23 @@ int main(int argc, char* argv[]) {
                 printf("\n");
                 break;
             case 'e':
+                
+                printf("TESTING get_current_ntp_time\n");
                 ntp_timestamp_t* ntp_timestamp = (ntp_timestamp_t*) malloc(sizeof(ntp_timestamp_t));
                 get_current_ntp_time(ntp_timestamp);
+
+                printf("TESTING ntp_time_to_string\n");
                 char buff[64];
                 ntp_time_to_string(ntp_timestamp, buff, sizeof(buff), 1);
                 puts(buff);
+
+                printf("TESTING ntp_time_to_double\n");
+                double ntp_double = ntp_time_to_double(ntp_timestamp);
+                printf("%lf\n", ntp_double);
+
+                printf("TESTING print_ntp_time\n");
+                print_ntp_time(ntp_timestamp, "Transmit Time", 1);
+
                 free(ntp_timestamp);
                 return RC_OK;
             case 'h':
@@ -356,19 +368,16 @@ void get_current_ntp_time(ntp_timestamp_t *ntp_ts){
         perror("Error during gettimeofday()");
     }
 
-    uint64_t modified_seconds = tv.tv_sec;
-    uint64_t modified_useconds = tv.tv_usec;
+    uint64_t modified_seconds = (uint64_t)tv.tv_sec;
+    uint64_t modified_useconds = (uint64_t)tv.tv_usec;
 
     modified_seconds += NTP_EPOCH_OFFSET;
     modified_useconds *= NTP_FRACTION_SCALE;
     modified_useconds /= USEC_INCREMENTS;
 
-    // printf("%ld.%06ld\n", (long)tv.tv_sec, (long)tv.tv_usec);
-
     ntp_ts->seconds = modified_seconds;
     ntp_ts->fraction = modified_useconds;
 
-    // printf("%ld.%06ld\n", (long)ntp_ts->seconds, (long)ntp_ts->fraction);
 }
 
 //STUDENT TODO
@@ -401,15 +410,16 @@ void ntp_time_to_string(const ntp_timestamp_t *ntp_ts, char *buffer, size_t buff
     // Hint: Convert NTP to Unix time, use localtime/gmtime, format with snprintf
     // snprintf(buffer, buffer_size, "TO BE IMPLEMENTED");
 
-    time_t t = (time_t)(ntp_ts->seconds - NTP_EPOCH_OFFSET);
+    time_t t = (time_t)((uint64_t)ntp_ts->seconds - NTP_EPOCH_OFFSET);
 
-    uint32_t ntp_fraction = ntp_ts->fraction;
+    uint64_t ntp_fraction = (uint64_t)ntp_ts->fraction;
     uint64_t ntp_frac_conversion = ntp_fraction * USEC_INCREMENTS;
-    uint32_t unix_fraction = ntp_frac_conversion / NTP_FRACTION_SCALE;
+    uint64_t unix_fraction = ntp_frac_conversion / NTP_FRACTION_SCALE;
     unsigned usec = unix_fraction;
     
     struct tm *tmv = local ? localtime(&t) : gmtime(&t);
-    snprintf(buffer, buffer_size, "%04d-%02d-%02d %02d:%02d:%02d.%06u", tmv->tm_year + NTP_EPOCH_YEAR, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, usec);
+    char* time_zone_label = local ? "(Local Time)" : "(UTC Time)";
+    snprintf(buffer, buffer_size, "%04d-%02d-%02d %02d:%02d:%02d.%06u %s", tmv->tm_year + NTP_EPOCH_YEAR, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, usec, time_zone_label);
 }
 
 //STUDENT TODO
@@ -436,10 +446,10 @@ void ntp_time_to_string(const ntp_timestamp_t *ntp_ts, char *buffer, size_t buff
  * Use NTP_FRACTION_SCALE (2^32) constant for the division
  */
 double ntp_time_to_double(const ntp_timestamp_t* timestamp) {
-    printf("ntp_time_to_double() - TO BE IMPLEMENTED\n");
-    // TODO: Implement this function
-    // Hint: Convert both parts to double and add
-    return 0.0;
+    double ntp_sec_d = (double)timestamp->seconds;
+    double ntp_frac_d = (double)timestamp->fraction / (double)NTP_FRACTION_SCALE;
+
+    return ntp_sec_d + ntp_frac_d;
 }
 
 //STUDENT TODO
@@ -457,10 +467,11 @@ double ntp_time_to_double(const ntp_timestamp_t* timestamp) {
  * Input: timestamp for current time, label="Transmit Time", local=1
  * Output: "Transmit Time: 2025-09-15 13:36:14.541216 (Local Time)"
  */
-void print_ntp_time(const ntp_timestamp_t *ts, const char* label, int local){
-    printf("print_ntp_time() - TO BE IMPLEMENTED - %s\n", label);
-    // TODO: Implement this function
-    // Hint: Use ntp_time_to_string and printf
+void print_ntp_time(const ntp_timestamp_t *ts, const char* label, int local) {
+    char buff[64];
+    printf("%s: ", label);
+    ntp_time_to_string(ts, buff, sizeof(buff), local);
+    puts(buff);
 }
 
 /*
