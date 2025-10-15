@@ -350,8 +350,8 @@ void get_current_ntp_time(ntp_timestamp_t *ntp_ts){
     modified_useconds *= NTP_FRACTION_SCALE;
     modified_useconds /= USEC_INCREMENTS;
 
-    ntp_ts->seconds = modified_seconds;
-    ntp_ts->fraction = modified_useconds;
+    ntp_ts->seconds = (uint32_t)modified_seconds;
+    ntp_ts->fraction = (uint32_t)modified_useconds;
 
 }
 
@@ -393,8 +393,12 @@ void ntp_time_to_string(const ntp_timestamp_t *ntp_ts, char *buffer, size_t buff
     unsigned usec = unix_fraction;
     
     struct tm *tmv = local ? localtime(&t) : gmtime(&t);
-    char* time_zone_label = local ? "(Local Time)" : "(UTC Time)";
-    snprintf(buffer, buffer_size, "%04d-%02d-%02d %02d:%02d:%02d.%06u %s", tmv->tm_year + NTP_EPOCH_YEAR, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, usec, time_zone_label);
+    if (!tmv) {
+        snprintf(buffer, buffer_size, "INVALID_TIME");
+        return;
+    }
+    
+    snprintf(buffer, buffer_size, "%04d-%02d-%02d %02d:%02d:%02d.%06u", tmv->tm_year + NTP_EPOCH_YEAR, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, usec);
 }
 
 //STUDENT TODO
@@ -443,10 +447,10 @@ double ntp_time_to_double(const ntp_timestamp_t* timestamp) {
  * Output: "Transmit Time: 2025-09-15 13:36:14.541216 (Local Time)"
  */
 void print_ntp_time(const ntp_timestamp_t *ts, const char* label, int local) {
-    char buff[64];
-    printf("%s: ", label);
+    char buff[TIME_BUFF_SIZE];
     ntp_time_to_string(ts, buff, sizeof(buff), local);
-    puts(buff);
+    char* time_zone_label = local ? "(Local Time)" : "(UTC Time)";
+    printf("%s: %s %s\n", label, buff, time_zone_label);
 }
 
 /*
@@ -779,12 +783,7 @@ int calculate_ntp_offset(const ntp_packet_t* request,
         return -1;
     }
     
-    // Initialize result with dummy values
-    result->delay = 0.0;
-    result->offset = 0.0;
-    result->final_dispersion = 0.0;
-    memset(&result->server_time, 0, sizeof(ntp_timestamp_t));
-    memset(&result->client_time, 0, sizeof(ntp_timestamp_t));
+    memset(result, 0, sizeof(ntp_result_t));
 
     double T1 = ntp_time_to_double(&request->xmit_time);
     double T2 = ntp_time_to_double(&response->recv_time);
@@ -794,7 +793,7 @@ int calculate_ntp_offset(const ntp_packet_t* request,
     double delay = (T4 - T1) - (T3 - T2);
     double offset = ((T2 - T1) + (T3 - T4)) / 2;
 
-    double server_delay = GET_NTP_Q1616_TS(response->root_delay);
+    double server_delay = GET_NTP_Q1616_SEC(response->root_delay);
     double server_dispersion = GET_NTP_Q1616_TS(response->root_dispersion);
 
     double final_dispersion = server_dispersion + (server_delay / 2) + (delay / 2);
@@ -858,9 +857,9 @@ void print_ntp_packet_info(const ntp_packet_t* packet, const char* label, int pa
     printf("Precision: %d\n", packet->precision);
     char buff[64];
     decode_reference_id(packet->stratum, packet->reference_id, buff, 64);
-    printf("Reference ID: [0x%08" PRIx32 "] %s\n", packet->reference_id, buff);
-    printf("Root Delay: %" PRIu32 "\n", packet->root_delay);
-    printf("Root Dispersion: %" PRIu32 "\n", packet->root_dispersion);
+    printf("Reference ID: [0x%08X] %s\n", packet->reference_id, buff);
+    printf("Root Delay: %u\n", packet->root_delay);
+    printf("Root Dispersion: %u\n", packet->root_dispersion);
     print_ntp_time(&packet->ref_time, "Reference Time", LOCAL_TIME);
     print_ntp_time(&packet->orig_time, "Original Time", LOCAL_TIME);
     print_ntp_time(&packet->recv_time, "Receive Time", LOCAL_TIME);
