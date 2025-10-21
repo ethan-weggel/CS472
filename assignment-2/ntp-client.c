@@ -896,7 +896,7 @@ void print_ntp_results(const ntp_result_t* result) {
     char cli_time_buff[TIME_BUFF_SIZE];
 
     print_ntp_time(&result->server_time, "Server Time", 1);
-    print_ntp_time(&result->client_time, "Client Time", 1);
+    print_ntp_time(&result->client_time, "Local Time", 1);
     printf("Round Trip Delay: %lf\n\n", result->delay);
 
     printf("Time Offset: %lf seconds\n", result->offset);
