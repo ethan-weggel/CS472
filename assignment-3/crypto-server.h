@@ -94,6 +94,12 @@
  */
 void start_server(const char* addr, int port);
 
+int server_loop(int server_socket, const char* addr, int port);
+
+int service_client_loop(int client_socket);
+
+int build_response(crypto_msg_t *request, crypto_msg_t *response, crypto_key_t *client_key, crypto_key_t *server_key);
+
 /**
  * ADDITIONAL FUNCTIONS YOU MAY WANT TO CREATE:
  * 
