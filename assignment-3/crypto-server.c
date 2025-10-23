@@ -248,13 +248,6 @@
  */
 
 void start_server(const char* addr, int port) {
-    printf("Student TODO: Implement start_server()\n");
-    printf("  - Create TCP socket\n");
-    printf("  - Bind to %s:%d\n", addr, port);
-    printf("  - Listen for connections (BACKLOG = %d)\n", BACKLOG);
-    printf("  - Accept and handle clients in a loop\n");
-    printf("  - Close socket on shutdown\n");
-
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     struct sockaddr_in server_addr;
@@ -277,19 +270,6 @@ void start_server(const char* addr, int port) {
     return;
 }
 
-//  * int server_loop(int server_socket, const char* addr, int port) {
-//  *     // 1. Print "Server listening..." message
-//  *     // 2. Infinite loop:
-//  *     //    a) Accept connection (creates new client socket)
-//  *     //    b) Get client IP using inet_ntop()
-//  *     //    c) Print "Client connected..." message
-//  *     //    d) Call service_client_loop(client_socket)
-//  *     //    e) Check return code:
-//  *     //       - RC_CLIENT_EXITED: close socket, accept next client
-//  *     //       - RC_CLIENT_REQ_SERVER_EXIT: close sockets, return
-//  *     //       - Error: close socket, continue
-//  *     //    f) Close client socket
-//  *     // 3. Return when server shutdown requested
 int server_loop(int server_socket, const char* addr, int port) {
     printf("Server listening...\n");
 
@@ -305,16 +285,26 @@ int server_loop(int server_socket, const char* addr, int port) {
 }
 
 int service_client_loop(int client_socket) {
-    char buff[BUFFER_SIZE];
-
-    ssize_t bytes_read = recv(client_socket, buff, sizeof(buff), 0);
+    char pdu_buff[BUFFER_SIZE];
     
     while (1) {
+        ssize_t bytes_read = recv(client_socket, pdu_buff, sizeof(pdu_buff), 0);
+
         if (bytes_read > 0) {
 
+            char msg_str[MAX_MSG_DATA_SIZE];
 
+            int pdu_length_validation = extract_crypto_msg_data((uint8_t*)&pdu_buff, bytes_read, msg_str, MAX_MSG_DATA_SIZE);
+            if (pdu_length_validation != 0) {
+                printf("Recieved PDU length does not equal header size plus payload size...");
+                continue;
+            }
 
-            ssize_t bytes_sent = send(client_socket, buff, bytes_read, 0);
+            // const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff; 
+
+            printf("Received mesage: %s\n", msg_str);
+
+            ssize_t bytes_sent = send(client_socket, pdu_buff, bytes_read, 0);
             continue;
         } else if (bytes_read == 0) {
             printf("Client disconnected orderly...\n");

@@ -181,6 +181,27 @@ int netmsg_from_cstr(const char *msg_str, uint8_t *msg_buff, uint16_t msg_buff_s
     return total_len;
 }
 
+int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz) {
+    if (!msg_str || !pdu_buff || pdu_buff_sz < sizeof(uint16_t)) {
+        return -1;
+    }
+
+    uint16_t msg_len = strlen(msg_str);
+    uint16_t total_len = sizeof(uint16_t) + msg_len;
+
+    if (total_len > pdu_buff_sz) {
+        return -1;
+    }
+
+    crypto_msg_t* pdu = (crypto_msg_t*)pdu_buff;
+
+    pdu->header.payload_len = htons(msg_len);
+
+    memcpy(pdu->payload, msg_str, msg_len);
+
+    return total_len;
+}
+
 // Helper function to extract message data from a received PDU
 // Returns 0 on success, -1 on error
 int extract_msg_data(const uint8_t *pdu_buff, uint16_t pdu_len, char *msg_str, uint16_t max_str_len) {
@@ -208,4 +229,27 @@ int extract_msg_data(const uint8_t *pdu_buff, uint16_t pdu_len, char *msg_str, u
     
     return 0;
 }
+
+int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len) {
+    if (!pdu_buff || !msg_str || pdu_len < sizeof(uint16_t) || max_str_len == 0) {
+        return -1;
+    }
+
+    const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff;
+    
+    uint16_t msg_len = ntohs(pdu->header.payload_len);
+    
+    if (pdu_len != sizeof(uint16_t) + msg_len) {
+        return -1;
+    }
+    
+    uint16_t copy_len = (msg_len < max_str_len - 1) ? msg_len : max_str_len - 1;
+    
+    memcpy(msg_str, pdu->payload, copy_len);
+    msg_str[copy_len] = '\0';
+    
+    return 0;
+}
+
+
 
