@@ -226,6 +226,7 @@
 #include "crypto-server.h"
 #include "crypto-lib.h"
 #include "protocol.h"
+#include <errno.h>
 
 
 /* =============================================================================
@@ -294,15 +295,42 @@ int server_loop(int server_socket, const char* addr, int port) {
 
     int shutdown_requested = 0;
 
-    struct sockaddr_in client_addr;
-
     while (!shutdown_requested) {
-        
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        int client_sock = accept(server_socket, (struct sockaddr*)&client_addr, &addr_len);
+        printf("Client connected...\n");
+        int client_rc = service_client_loop(client_sock);
     }
 }
 
 int service_client_loop(int client_socket) {
+    char buff[BUFFER_SIZE];
 
+    ssize_t bytes_read = recv(client_socket, buff, sizeof(buff), 0);
+    
+    while (1) {
+        if (bytes_read > 0) {
+
+
+
+            ssize_t bytes_sent = send(client_socket, buff, bytes_read, 0);
+            continue;
+        } else if (bytes_read == 0) {
+            printf("Client disconnected orderly...\n");
+            break;
+        } else {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            perror("recv");
+            close(client_socket);
+            return RC_CLIENT_EXITED;
+        }
+    }
 }
 
 int build_response(crypto_msg_t *request, crypto_msg_t *response, 
