@@ -1,59 +1,46 @@
 /**
  * =============================================================================
- * STUDENT ASSIGNMENT: CRYPTO-SERVER.C
+ * STUDENT ASSIGNMENT: CRYPTO-CLIENT.C
  * =============================================================================
  * 
  * ASSIGNMENT OBJECTIVE:
- * Implement a TCP server that accepts client connections and processes
- * encrypted/plaintext messages. Your focus is on socket programming, connection
- * handling, and the server-side protocol implementation.
+ * Implement a TCP client that communicates with a server using an encrypted
+ * protocol. Your focus is on socket programming and network communication.
+ * The cryptographic functions are provided for you in crypto-lib.
  * 
  * =============================================================================
  * WHAT YOU NEED TO IMPLEMENT:
  * =============================================================================
  * 
- * 1. SERVER SOCKET SETUP (start_server function):
+ * 1. SOCKET CONNECTION (start_client function):
  *    - Create a TCP socket using socket()
- *    - Set SO_REUSEADDR socket option (helpful during development)
- *    - Configure server address structure (struct sockaddr_in)
- *    - Bind the socket to the address using bind()
- *    - Start listening with listen()
- *    - Call your server loop function
- *    - Close socket on shutdown
+ *    - Configure the server address structure (struct sockaddr_in)
+ *    - Connect to the server using connect()
+ *    - Handle connection errors appropriately
+ *    - Call your communication loop function
+ *    - Close the socket when done
  * 
- * 2. SERVER MAIN LOOP:
- *    - Create a function that handles multiple clients sequentially
+ * 2. CLIENT COMMUNICATION LOOP:
+ *    - Create a function that handles the request/response cycle
+ *    - Allocate buffers for sending and receiving data
+ *    - Maintain a session key (crypto_key_t) for encryption
  *    - Loop to:
- *      a) Accept incoming connections using accept()
- *      b) Get client's IP address for logging (inet_ntop)
- *      c) Call your client service function
- *      d) Close the client socket when done
- *      e) Return to accept next client (or exit if shutdown requested)
+ *      a) Get user command using get_command() (provided below)
+ *      b) Build a PDU (Protocol Data Unit) from the command
+ *      c) Send the PDU to the server using send()
+ *      d) Receive the server's response using recv()
+ *      e) Process the response (extract key, decrypt data, etc.)
+ *      f) Handle exit commands and connection closures
+ *    - Free allocated buffers before returning
  * 
- * 3. CLIENT SERVICE LOOP:
- *    - Create a function that handles communication with ONE client
- *    - Allocate buffers for sending and receiving
- *    - Maintain session keys (client_key and server_key)
- *    - Loop to:
- *      a) Receive a PDU from the client using recv()
- *      b) Handle recv() return values (0 = closed, <0 = error)
- *      c) Parse the received PDU
- *      d) Check for special commands (exit, server shutdown)
- *      e) Build response PDU based on message type
- *      f) Send response using send()
- *      g) Return appropriate status code when client exits
- *    - Free buffers before returning
- * 
- * 4. RESPONSE BUILDING:
- *    - Consider creating a helper function to build response PDUs
- *    - Handle different message types:
- *      * MSG_KEY_EXCHANGE: Call gen_key_pair(), send client_key to client
- *      * MSG_DATA: Echo back with "echo " prefix
- *      * MSG_ENCRYPTED_DATA: Decrypt, add "echo " prefix, re-encrypt
- *      * MSG_CMD_CLIENT_STOP: No response needed (client will exit)
- *      * MSG_CMD_SERVER_STOP: No response needed (server will exit)
- *    - Set proper direction (DIR_RESPONSE)
- *    - Return total PDU size
+ * 3. PDU CONSTRUCTION:
+ *    - Consider creating a helper function to build PDUs
+ *    - Fill in the PDU header (msg_type, direction, payload_len)
+ *    - For MSG_DATA: copy plaintext to payload
+ *    - For MSG_ENCRYPTED_DATA: use encrypt_string() to encrypt before copying
+ *    - For MSG_KEY_EXCHANGE: no payload needed
+ *    - For command messages: no payload needed
+ *    - Return the total PDU size (header + payload)
  * 
  * =============================================================================
  * ONE APPROACH TO SOLVE THIS PROBLEM:
@@ -61,69 +48,43 @@
  * 
  * FUNCTION STRUCTURE:
  * 
- * void start_server(const char* addr, int port) {
+ * void start_client(const char* addr, int port) {
  *     // 1. Create TCP socket
- *     // 2. Set SO_REUSEADDR option (for development)
- *     // 3. Configure server address (sockaddr_in)
- *     //    - Handle "0.0.0.0" specially (use INADDR_ANY)
- *     // 4. Bind socket to address
- *     // 5. Start listening (use BACKLOG constant)
- *     // 6. Call your server loop function
- *     // 7. Close socket
+ *     // 2. Configure server address (sockaddr_in)
+ *     // 3. Connect to server
+ *     // 4. Print connection confirmation
+ *     // 5. Call your communication loop function
+ *     // 6. Close socket
+ *     // 7. Print disconnection message
  * }
  * 
- * int server_loop(int server_socket, const char* addr, int port) {
- *     // 1. Print "Server listening..." message
- *     // 2. Infinite loop:
- *     //    a) Accept connection (creates new client socket)
- *     //    b) Get client IP using inet_ntop()
- *     //    c) Print "Client connected..." message
- *     //    d) Call service_client_loop(client_socket)
- *     //    e) Check return code:
- *     //       - RC_CLIENT_EXITED: close socket, accept next client
- *     //       - RC_CLIENT_REQ_SERVER_EXIT: close sockets, return
- *     //       - Error: close socket, continue
- *     //    f) Close client socket
- *     // 3. Return when server shutdown requested
- * }
- * 
- * int service_client_loop(int client_socket) {
- *     // 1. Allocate send/receive buffers
- *     // 2. Initialize keys to NULL_CRYPTO_KEY
+ * int client_loop(int socket_fd) {
+ *     // 1. Allocate buffers (send, receive, input)
+ *     // 2. Initialize session_key to NULL_CRYPTO_KEY
  *     // 3. Loop:
- *     //    a) Receive PDU from client
- *     //    b) Check recv() return:
- *     //       - 0: client closed, return RC_CLIENT_EXITED
- *     //       - <0: error, return RC_CLIENT_EXITED
- *     //    c) Cast buffer to crypto_msg_t*
- *     //    d) Check for MSG_CMD_SERVER_STOP -> return RC_CLIENT_REQ_SERVER_EXIT
- *     //    e) Build response PDU (use helper function)
- *     //    f) Send response
- *     //    g) Loop back
- *     // 4. Free buffers before returning
+ *     //    a) Call get_command() to get user input
+ *     //    b) Build PDU from command (use helper function)
+ *     //    c) Send PDU using send()
+ *     //    d) If exit command, break after sending
+ *     //    e) Receive response using recv()
+ *     //    f) Handle recv() return values (0 = closed, <0 = error)
+ *     //    g) Process response:
+ *     //       - If MSG_KEY_EXCHANGE: extract key from payload
+ *     //       - If MSG_ENCRYPTED_DATA: decrypt using decrypt_string()
+ *     //       - Print results
+ *     //    h) Loop back
+ *     // 4. Free buffers
+ *     // 5. Return success/error code
  * }
  * 
- * int build_response(crypto_msg_t *request, crypto_msg_t *response, 
- *                    crypto_key_t *client_key, crypto_key_t *server_key) {
- *     // 1. Set response->header.direction = DIR_RESPONSE
- *     // 2. Set response->header.msg_type = request->header.msg_type
- *     // 3. Switch on request type:
- *     //    MSG_KEY_EXCHANGE:
- *     //      - Call gen_key_pair(server_key, client_key)
- *     //      - Copy client_key to response->payload
- *     //      - Set payload_len = sizeof(crypto_key_t)
- *     //    MSG_DATA:
- *     //      - Format: "echo <original message>"
- *     //      - Copy to response->payload
- *     //      - Set payload_len
- *     //    MSG_ENCRYPTED_DATA:
- *     //      - Decrypt request->payload using decrypt_string()
- *     //      - Format: "echo <decrypted message>"
- *     //      - Encrypt result using encrypt_string()
- *     //      - Copy encrypted data to response->payload
- *     //      - Set payload_len
- *     //    MSG_CMD_*:
- *     //      - Set payload_len = 0
+ * int build_packet(const msg_cmd_t *cmd, crypto_msg_t *pdu, crypto_key_t key) {
+ *     // 1. Set pdu->header.msg_type = cmd->cmd_id
+ *     // 2. Set pdu->header.direction = DIR_REQUEST
+ *     // 3. Based on cmd->cmd_id:
+ *     //    - MSG_DATA: copy cmd->cmd_line to payload, set length
+ *     //    - MSG_ENCRYPTED_DATA: encrypt cmd->cmd_line, set length
+ *     //    - MSG_KEY_EXCHANGE: set length to 0
+ *     //    - Command messages: set length to 0
  *     // 4. Return sizeof(crypto_pdu_t) + payload_len
  * }
  * 
@@ -131,87 +92,72 @@
  * IMPORTANT PROTOCOL DETAILS:
  * =============================================================================
  * 
- * SERVER RESPONSIBILITIES:
- * 1. Generate encryption keys when client requests (MSG_KEY_EXCHANGE)
- * 2. Send the CLIENT'S key to the client (not the server's key!)
- * 3. Keep both keys: server_key (for decrypting client messages)
- *                    client_key (to send to client)
- * 4. Echo messages back with "echo " prefix
- * 5. Handle encrypted data: decrypt -> process -> encrypt -> send
+ * PDU STRUCTURE:
+ *   typedef struct crypto_pdu {
+ *       uint8_t  msg_type;      // MSG_DATA, MSG_ENCRYPTED_DATA, etc.
+ *       uint8_t  direction;     // DIR_REQUEST or DIR_RESPONSE
+ *       uint16_t payload_len;   // Length of payload in bytes
+ *   } crypto_pdu_t;
  * 
- * KEY GENERATION:
- *   crypto_key_t server_key, client_key;
- *   gen_key_pair(&server_key, &client_key);
- *   // Send client_key to the client in MSG_KEY_EXCHANGE response
- *   memcpy(response->payload, &client_key, sizeof(crypto_key_t));
+ *   typedef struct crypto_msg {
+ *       crypto_pdu_t header;
+ *       uint8_t      payload[]; // Flexible array
+ *   } crypto_msg_t;
  * 
- * DECRYPTING CLIENT DATA:
- *   // Client encrypted with their key, we decrypt with server_key
- *   uint8_t decrypted[MAX_SIZE];
- *   decrypt_string(server_key, decrypted, request->payload, request->header.payload_len);
- *   decrypted[request->header.payload_len] = '\0'; // Null-terminate
+ * MESSAGE TYPES (from protocol.h):
+ *   MSG_KEY_EXCHANGE     - Request/send encryption key
+ *   MSG_DATA             - Plain text message
+ *   MSG_ENCRYPTED_DATA   - Encrypted message (requires session key)
+ *   MSG_CMD_CLIENT_STOP  - Client exit command
+ *   MSG_CMD_SERVER_STOP  - Server shutdown command
  * 
- * ENCRYPTING RESPONSE:
- *   // We encrypt with server_key for client to decrypt with their key
- *   uint8_t encrypted[MAX_SIZE];
- *   int encrypted_len = encrypt_string(server_key, encrypted, plaintext, plaintext_len);
- *   memcpy(response->payload, encrypted, encrypted_len);
- *   response->header.payload_len = encrypted_len;
- * 
- * RETURN CODES:
- *   RC_CLIENT_EXITED          - Client disconnected normally
- *   RC_CLIENT_REQ_SERVER_EXIT - Client requested server shutdown
- *   RC_OK                     - Success
- *   Negative values           - Errors
+ * TYPICAL MESSAGE FLOW:
+ *   1. Client sends MSG_KEY_EXCHANGE request
+ *   2. Server responds with MSG_KEY_EXCHANGE + key in payload
+ *   3. Client extracts key: memcpy(&session_key, response->payload, sizeof(crypto_key_t))
+ *   4. Client can now send MSG_ENCRYPTED_DATA
+ *   5. Server responds with MSG_ENCRYPTED_DATA
+ *   6. Client decrypts using decrypt_string()
  * 
  * =============================================================================
- * SOCKET PROGRAMMING REMINDERS:
+ * CRYPTO LIBRARY FUNCTIONS YOU'LL USE:
  * =============================================================================
  * 
- * CREATING AND BINDING:
- *   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
- *   
- *   struct sockaddr_in addr;
- *   memset(&addr, 0, sizeof(addr));
- *   addr.sin_family = AF_INET;
- *   addr.sin_port = htons(port);
- *   addr.sin_addr.s_addr = INADDR_ANY;  // or use inet_pton()
- *   
- *   bind(sockfd, (struct sockaddr*)&addr, sizeof(addr));
- *   listen(sockfd, BACKLOG);
+ * int encrypt_string(crypto_key_t key, uint8_t *out, uint8_t *in, size_t len)
+ *   - Encrypts a string before sending
+ *   - Returns number of encrypted bytes or negative on error
  * 
- * ACCEPTING CONNECTIONS:
- *   struct sockaddr_in client_addr;
- *   socklen_t addr_len = sizeof(client_addr);
- *   int client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addr_len);
+ * int decrypt_string(crypto_key_t key, uint8_t *out, uint8_t *in, size_t len)
+ *   - Decrypts received data
+ *   - Returns number of decrypted chars or negative on error
+ *   - NOTE: Output is NOT null-terminated, you must add '\0'
  * 
- * GETTING CLIENT IP:
- *   char client_ip[INET_ADDRSTRLEN];
- *   inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+ * void print_msg_info(crypto_msg_t *msg, crypto_key_t key, int mode)
+ *   - Prints PDU details for debugging
+ *   - Use CLIENT_MODE for the mode parameter
+ *   - VERY helpful for debugging your protocol!
  * 
  * =============================================================================
  * DEBUGGING TIPS:
  * =============================================================================
  * 
- * 1. Use print_msg_info() to display received and sent PDUs
- * 2. Print client IP when connections are accepted
- * 3. Check all socket operation return values
- * 4. Test with plaintext (MSG_DATA) before trying encryption
- * 5. Verify keys are generated correctly (print key values)
- * 6. Use telnet or netcat to test basic connectivity first
- * 7. Handle partial recv() - though for this assignment, assume full PDU arrives
+ * 1. Use print_msg_info() before sending and after receiving
+ * 2. Check return values from ALL socket operations
+ * 3. Verify payload_len matches actual data length
+ * 4. Remember: recv() may return less bytes than expected
+ * 5. Encrypted data requires a valid session key (check for NULL_CRYPTO_KEY)
+ * 6. Use printf() liberally to trace program flow
  * 
  * =============================================================================
  * TESTING RECOMMENDATIONS:
  * =============================================================================
  * 
- * 1. Start simple: Accept connection and echo plain text
- * 2. Test key exchange: Client sends '#', server generates and returns key
- * 3. Test encryption: Client sends '!message', server decrypts, echoes, encrypts
- * 4. Test multiple clients: Connect, disconnect, connect again
- * 5. Test shutdown: Client sends '=', server exits gracefully
- * 6. Test error cases: Client disconnects unexpectedly
+ * 1. Start simple: Get plain MSG_DATA working first
+ * 2. Test key exchange: Send '#' command
+ * 3. Test encryption: Send '!message' after key exchange
+ * 4. Test exit commands: '-' for client exit, '=' for server shutdown
+ * 5. Test error cases: What if server closes unexpectedly?
  * 
- * Good luck! Server programming requires careful state management!
+ * Good luck! Remember: Focus on the socket operations. The crypto is done!
  * =============================================================================
  */

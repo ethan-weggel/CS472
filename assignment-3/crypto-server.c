@@ -266,6 +266,8 @@ void start_server(const char* addr, int port) {
 
     int rc = server_loop(sockfd, addr, port);
 
+    printf("Return code from server: %d\n", rc);
+
     close(sockfd);
     return;
 }
@@ -296,18 +298,31 @@ int service_client_loop(int client_socket) {
 
             int pdu_length_validation = extract_crypto_msg_data((uint8_t*)&pdu_buff, bytes_read, msg_str, MAX_MSG_DATA_SIZE);
             if (pdu_length_validation != 0) {
-                printf("Recieved PDU length does not equal header size plus payload size...");
+                printf("Recieved PDU length does not equal header size plus payload size...\n");
                 continue;
             }
 
-            // const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff; 
+            crypto_msg_t *pdu = (crypto_msg_t *)pdu_buff;
+            pdu->header.direction = DIR_RESPONSE;
 
-            printf("Received mesage: %s\n", msg_str);
+            switch (pdu->header.msg_type) {
+                case MSG_CMD_CLIENT_STOP:
+                    pdu->header.msg_type = MSG_EXIT;
+                    break;
+                case MSG_CMD_SERVER_STOP:
+                    pdu->header.msg_type = MSG_SHUTDOWN;
+                    break;
+                default:
+                    pdu->header.msg_type = MSG_DATA;
+                    break;
+            }
 
-            ssize_t bytes_sent = send(client_socket, pdu_buff, bytes_read, 0);
+            ssize_t bytes_sent = send(client_socket, pdu_buff, (size_t)bytes_read, 0);
+            (void)bytes_sent;
             continue;
+
         } else if (bytes_read == 0) {
-            printf("Client disconnected orderly...\n");
+            printf("Client disconnected...\n");
             break;
         } else {
             if (errno == EINTR) {

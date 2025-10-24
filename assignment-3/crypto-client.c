@@ -188,11 +188,103 @@
  *   port - Server port number (e.g., 1234)
  */
 void start_client(const char* addr, int port) {
-    printf("Student TODO: Implement start_client()\n");
-    printf("  - Create TCP socket\n");
-    printf("  - Connect to %s:%d\n", addr, port);
-    printf("  - Implement communication loop\n");
-    printf("  - Close socket when done\n");
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    struct sockaddr_in client_addr;
+    memset(&client_addr, 0, sizeof(client_addr));
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_port = htons(port);
+
+    if(inet_pton(AF_INET, addr, &client_addr.sin_addr) <= 0) {
+        close(sockfd);
+        printf("Error converting address to network format...\n");
+        return;
+    }
+
+    if (connect(sockfd, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0) {
+        printf("Server not running...\n");
+        close(sockfd);
+        return;
+    }
+
+    printf("connected to server %s:%d\n", addr, port);
+    printf("Type messages to send to server.\n");
+    printf("Type 'exit' to quit, or 'exit server' to shutdown the server.\n");
+    printf("Press Ctrl+C to exit at any time.\n\n");
+
+    int rc = client_loop(sockfd);
+
+    printf("Client exited with return code %d\n", rc);
+}
+
+int client_loop(int sockfd) {
+    uint8_t send_buff[MAX_MSG_SIZE];
+    uint8_t recv_buff[MAX_MSG_SIZE];
+    char msg[MAX_MSG_DATA_SIZE];
+    char input[MAX_MSG_DATA_SIZE];
+
+    crypto_key_t session_key = NULL_CRYPTO_KEY;
+
+    while (1) {
+        msg_cmd_t command;
+        int result = get_command(input, MAX_MSG_DATA_SIZE, &command);
+        if (result == CMD_EXECUTE) {
+
+            if (!command.cmd_line || command.cmd_line[0] == '\0') {
+                continue; 
+            }
+
+            // sends data
+            int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+
+            crypto_msg_t *wire = (crypto_msg_t*)send_buff;
+            uint16_t msg_len   = ntohs(wire->header.payload_len);
+
+            uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+            crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
+            print_out->header.msg_type = wire->header.msg_type;
+            print_out->header.direction = wire->header.direction;
+            print_out->header.payload_len = msg_len; 
+            memcpy(print_out->payload, wire->payload, msg_len);
+            print_out->payload[msg_len] = '\0';
+            print_msg_info(print_out, session_key, CLIENT_MODE);
+
+
+            send(sockfd, send_buff, size_of_pdu, 0);
+
+            // receives header
+            uint8_t msg_type, direction;
+            uint16_t payload_length;
+
+            int bytes_received = recv(sockfd, recv_buff, sizeof(crypto_pdu_t), 0);
+            memcpy(&payload_length, recv_buff+2, 2);
+            payload_length = ntohs(payload_length);
+
+
+            // receives payload
+            recv(sockfd, recv_buff + sizeof(crypto_pdu_t), payload_length, 0);
+            extract_crypto_msg_data(recv_buff, (sizeof(crypto_pdu_t) + payload_length), msg, MAX_MSG_DATA_SIZE, &msg_type, &direction);
+            crypto_msg_t *wire_in = (crypto_msg_t*)recv_buff;
+            uint16_t msg_len_in   = ntohs(wire_in->header.payload_len);
+
+            uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+            crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
+            print_in->header.msg_type    = wire_in->header.msg_type;
+            print_in->header.direction   = wire_in->header.direction;
+            print_in->header.payload_len = msg_len_in;        // host order
+            memcpy(print_in->payload, wire_in->payload, msg_len_in);
+            print_in->payload[msg_len_in] = '\0';
+
+            print_msg_info(print_in, session_key, SERVER_MODE);
+
+            if (strcmp(msg, "quit") == 0) {
+                return MSG_CMD_CLIENT_STOP;
+            }
+
+        } else {
+            continue;
+        }
+    }
 }
 
 

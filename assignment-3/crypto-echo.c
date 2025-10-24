@@ -181,13 +181,13 @@ int netmsg_from_cstr(const char *msg_str, uint8_t *msg_buff, uint16_t msg_buff_s
     return total_len;
 }
 
-int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz) {
-    if (!msg_str || !pdu_buff || pdu_buff_sz < sizeof(uint16_t)) {
+int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction) {
+    if (!msg_str || !pdu_buff) {
         return -1;
     }
 
     uint16_t msg_len = strlen(msg_str);
-    uint16_t total_len = sizeof(uint16_t) + msg_len;
+    uint16_t total_len = (uint16_t)(sizeof(crypto_pdu_t) + msg_len);
 
     if (total_len > pdu_buff_sz) {
         return -1;
@@ -195,6 +195,8 @@ int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_bu
 
     crypto_msg_t* pdu = (crypto_msg_t*)pdu_buff;
 
+    pdu->header.msg_type = msg_type;
+    pdu->header.direction = direction;
     pdu->header.payload_len = htons(msg_len);
 
     memcpy(pdu->payload, msg_str, msg_len);
@@ -230,20 +232,33 @@ int extract_msg_data(const uint8_t *pdu_buff, uint16_t pdu_len, char *msg_str, u
     return 0;
 }
 
-int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len) {
-    if (!pdu_buff || !msg_str || pdu_len < sizeof(uint16_t) || max_str_len == 0) {
+int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir) {
+    if (!pdu_buff || !msg_str || max_str_len == 0) {
+        return -1;
+    }
+
+    if (pdu_len < sizeof(crypto_pdu_t)) {
         return -1;
     }
 
     const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff;
     
     uint16_t msg_len = ntohs(pdu->header.payload_len);
-    
-    if (pdu_len != sizeof(uint16_t) + msg_len) {
+
+    if (pdu_len != (uint16_t)(sizeof(crypto_pdu_t) + msg_len)) {
         return -1;
     }
+
+    if (out_type) {
+        *out_type = pdu->header.msg_type;
+    }
+
+    if (out_dir) {
+        *out_dir = pdu->header.direction;
+    }
     
-    uint16_t copy_len = (msg_len < max_str_len - 1) ? msg_len : max_str_len - 1;
+    
+    uint16_t copy_len = (msg_len < (uint16_t)(max_str_len - 1)) ? msg_len : (uint16_t)(max_str_len - 1);
     
     memcpy(msg_str, pdu->payload, copy_len);
     msg_str[copy_len] = '\0';

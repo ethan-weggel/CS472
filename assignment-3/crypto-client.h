@@ -100,4 +100,6 @@ void start_client(const char* addr, int port);
  */
 int get_command(char *cmd_buff, size_t cmd_buff_sz, msg_cmd_t *msg_cmd);
 
+int client_loop(int sockfd);
+
 #endif // __CRYPTO_CLIENT_H__
