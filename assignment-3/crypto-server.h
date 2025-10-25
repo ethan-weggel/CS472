@@ -100,6 +100,9 @@ int service_client_loop(int client_socket);
 
 int build_response(crypto_msg_t *request, crypto_msg_t *response, crypto_key_t *client_key, crypto_key_t *server_key);
 
+// int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
+// int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
+
 /**
  * ADDITIONAL FUNCTIONS YOU MAY WANT TO CREATE:
  * 

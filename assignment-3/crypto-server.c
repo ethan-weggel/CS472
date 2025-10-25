@@ -228,6 +228,9 @@
 #include "protocol.h"
 #include <errno.h>
 
+static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
+static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
+
 
 /* =============================================================================
  * STUDENT TODO: IMPLEMENT THIS FUNCTION
@@ -265,25 +268,30 @@ void start_server(const char* addr, int port) {
     listen(sockfd, BACKLOG);
 
     int rc = server_loop(sockfd, addr, port);
-
-    printf("Return code from server: %d\n", rc);
+    printf("Server exited with return code %d\n", rc);
 
     close(sockfd);
     return;
 }
 
 int server_loop(int server_socket, const char* addr, int port) {
-    printf("Server listening...\n");
+    printf("Server listening on %s:%d...\n", addr, port);
 
     int shutdown_requested = 0;
-
+    int rc;
     while (!shutdown_requested) {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
         int client_sock = accept(server_socket, (struct sockaddr*)&client_addr, &addr_len);
         printf("Client connected...\n");
-        int client_rc = service_client_loop(client_sock);
+        rc = service_client_loop(client_sock);
+        if (rc == 10) {
+            shutdown_requested = 1;
+            rc = 0;
+        }
+        close(client_sock);
     }
+    return rc;
 }
 
 int service_client_loop(int client_socket) {
@@ -296,7 +304,7 @@ int service_client_loop(int client_socket) {
 
             char msg_str[MAX_MSG_DATA_SIZE];
 
-            int pdu_length_validation = extract_crypto_msg_data((uint8_t*)&pdu_buff, bytes_read, msg_str, MAX_MSG_DATA_SIZE);
+            int pdu_length_validation = extract_crypto_msg_data((uint8_t*)pdu_buff, (uint16_t)bytes_read, msg_str, MAX_MSG_DATA_SIZE, NULL, NULL);
             if (pdu_length_validation != 0) {
                 printf("Recieved PDU length does not equal header size plus payload size...\n");
                 continue;
@@ -311,7 +319,10 @@ int service_client_loop(int client_socket) {
                     break;
                 case MSG_CMD_SERVER_STOP:
                     pdu->header.msg_type = MSG_SHUTDOWN;
-                    break;
+                    ssize_t bytes_sent = send(client_socket, pdu_buff, (size_t)bytes_read, 0);
+                    (void)bytes_sent;
+                    printf("Shutting down server...\n");
+                    return 10;
                 default:
                     pdu->header.msg_type = MSG_DATA;
                     break;
@@ -336,9 +347,77 @@ int service_client_loop(int client_socket) {
             return RC_CLIENT_EXITED;
         }
     }
+
+    return 0;
 }
 
 int build_response(crypto_msg_t *request, crypto_msg_t *response, 
                    crypto_key_t *client_key, crypto_key_t *server_key) {
 
+    (void)request;
+    (void)response;
+    (void)client_key;
+    (void)server_key;
+
+    return RC_OK; 
+}
+
+
+static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir) {
+    if (!pdu_buff || !msg_str || max_str_len == 0) {
+        return -1;
+    }
+
+    if (pdu_len < sizeof(crypto_pdu_t)) {
+        return -1;
+    }
+
+    const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff;
+    
+    uint16_t msg_len = ntohs(pdu->header.payload_len);
+
+    if (pdu_len != (uint16_t)(sizeof(crypto_pdu_t) + msg_len)) {
+        return -1;
+    }
+
+    if (out_type) {
+        *out_type = pdu->header.msg_type;
+    }
+
+    if (out_dir) {
+        *out_dir = pdu->header.direction;
+    }
+    
+    
+    uint16_t copy_len = (msg_len < (uint16_t)(max_str_len - 1)) ? msg_len : (uint16_t)(max_str_len - 1);
+    
+    memcpy(msg_str, pdu->payload, copy_len);
+    msg_str[copy_len] = '\0';
+    
+    return 0;
+}
+
+static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction) {
+    if (!pdu_buff) {
+        return -1;
+    }
+
+    uint16_t msg_len = msg_str ? (uint16_t)strlen(msg_str) : 0;
+    uint16_t total_len = (uint16_t)(sizeof(crypto_pdu_t) + msg_len);
+
+    if (total_len > pdu_buff_sz) {
+        return -1;
+    }
+
+    crypto_msg_t* pdu = (crypto_msg_t*)pdu_buff;
+
+    pdu->header.msg_type = msg_type;
+    pdu->header.direction = direction;
+    pdu->header.payload_len = htons(msg_len);
+
+    if (msg_len > 0) {
+        memcpy(pdu->payload, msg_str, msg_len);
+    } 
+
+    return total_len;
 }

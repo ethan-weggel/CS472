@@ -99,6 +99,8 @@ void start_client(const char* addr, int port);
  * so cmd_buff must remain valid while using msg_cmd.
  */
 int get_command(char *cmd_buff, size_t cmd_buff_sz, msg_cmd_t *msg_cmd);
+// int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
+// int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
 
 int client_loop(int sockfd);
 

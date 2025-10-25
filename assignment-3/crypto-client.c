@@ -173,6 +173,10 @@
 #include "crypto-lib.h"
 #include "protocol.h"
 
+/* NEW CODE ONLY: file-local prototypes to avoid multiple definition at link time */
+static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
+static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
+static ssize_t recv_all(int fd, uint8_t *buf, size_t want);
 
 /* =============================================================================
  * STUDENT TODO: IMPLEMENT THIS FUNCTION
@@ -215,6 +219,7 @@ void start_client(const char* addr, int port) {
     int rc = client_loop(sockfd);
 
     printf("Client exited with return code %d\n", rc);
+    return;
 }
 
 int client_loop(int sockfd) {
@@ -230,16 +235,20 @@ int client_loop(int sockfd) {
         int result = get_command(input, MAX_MSG_DATA_SIZE, &command);
         if (result == CMD_EXECUTE) {
 
-            if (!command.cmd_line || command.cmd_line[0] == '\0') {
+            if (!command.cmd_id) {
                 continue; 
+            }
+
+            if (command.cmd_line != NULL && command.cmd_line[0] == '\0') {
+                continue;
             }
 
             // sends data
             int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
-
             crypto_msg_t *wire = (crypto_msg_t*)send_buff;
-            uint16_t msg_len   = ntohs(wire->header.payload_len);
+            uint16_t msg_len = ntohs(wire->header.payload_len);
 
+            // request printing
             uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
             crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
             print_out->header.msg_type = wire->header.msg_type;
@@ -249,36 +258,45 @@ int client_loop(int sockfd) {
             print_out->payload[msg_len] = '\0';
             print_msg_info(print_out, session_key, CLIENT_MODE);
 
-
             send(sockfd, send_buff, size_of_pdu, 0);
 
             // receives header
             uint8_t msg_type, direction;
             uint16_t payload_length;
 
-            int bytes_received = recv(sockfd, recv_buff, sizeof(crypto_pdu_t), 0);
-            memcpy(&payload_length, recv_buff+2, 2);
+            ssize_t bytes_received = recv_all(sockfd, recv_buff, sizeof(crypto_pdu_t));
+            if (bytes_received <= 0) {
+                close(sockfd);
+                return -1;
+            }
+
+            memcpy(&payload_length, recv_buff + 2, 2);
             payload_length = ntohs(payload_length);
 
+            if (payload_length > 0) {
+                ssize_t pr = recv_all(sockfd, recv_buff + sizeof(crypto_pdu_t), payload_length);
+                if (pr <= 0) {
+                    close(sockfd);
+                    return -1;
+                }
+            }
 
-            // receives payload
-            recv(sockfd, recv_buff + sizeof(crypto_pdu_t), payload_length, 0);
             extract_crypto_msg_data(recv_buff, (sizeof(crypto_pdu_t) + payload_length), msg, MAX_MSG_DATA_SIZE, &msg_type, &direction);
             crypto_msg_t *wire_in = (crypto_msg_t*)recv_buff;
-            uint16_t msg_len_in   = ntohs(wire_in->header.payload_len);
+            uint16_t msg_len_in = ntohs(wire_in->header.payload_len);
 
+            // print response 
             uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
             crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
-            print_in->header.msg_type    = wire_in->header.msg_type;
-            print_in->header.direction   = wire_in->header.direction;
-            print_in->header.payload_len = msg_len_in;        // host order
+            print_in->header.msg_type = wire_in->header.msg_type;
+            print_in->header.direction = wire_in->header.direction;
+            print_in->header.payload_len = msg_len_in;
             memcpy(print_in->payload, wire_in->payload, msg_len_in);
             print_in->payload[msg_len_in] = '\0';
-
             print_msg_info(print_in, session_key, SERVER_MODE);
 
-            if (strcmp(msg, "quit") == 0) {
-                return MSG_CMD_CLIENT_STOP;
+            if (wire_in->header.msg_type == MSG_EXIT || wire_in->header.msg_type == MSG_SHUTDOWN) {
+                return 0;
             }
 
         } else {
@@ -392,4 +410,76 @@ int get_command(char *cmd_buff, size_t cmd_buff_sz, msg_cmd_t *msg_cmd)
     }
     
     return CMD_NO_EXEC;
+}
+
+static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir) {
+    if (!pdu_buff || !msg_str || max_str_len == 0) {
+        return -1;
+    }
+
+    if (pdu_len < sizeof(crypto_pdu_t)) {
+        return -1;
+    }
+
+    const crypto_msg_t *pdu = (const crypto_msg_t *)pdu_buff;
+    
+    uint16_t msg_len = ntohs(pdu->header.payload_len);
+
+    if (pdu_len != (uint16_t)(sizeof(crypto_pdu_t) + msg_len)) {
+        return -1;
+    }
+
+    if (out_type) {
+        *out_type = pdu->header.msg_type;
+    }
+
+    if (out_dir) {
+        *out_dir = pdu->header.direction;
+    }
+    
+    
+    uint16_t copy_len = (msg_len < (uint16_t)(max_str_len - 1)) ? msg_len : (uint16_t)(max_str_len - 1);
+    
+    memcpy(msg_str, pdu->payload, copy_len);
+    msg_str[copy_len] = '\0';
+    
+    return 0;
+}
+
+static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction) {
+    if (!pdu_buff) {                           // NEW: allow msg_str == NULL for 0-length payloads
+        return -1;                             // NEW
+    }                                          // NEW
+
+    uint16_t msg_len = msg_str ? (uint16_t)strlen(msg_str) : 0;
+    uint16_t total_len = (uint16_t)(sizeof(crypto_pdu_t) + msg_len);
+
+    if (total_len > pdu_buff_sz) {
+        return -1;
+    }
+
+    crypto_msg_t* pdu = (crypto_msg_t*)pdu_buff;
+
+    pdu->header.msg_type = msg_type;
+    pdu->header.direction = direction;
+    pdu->header.payload_len = htons(msg_len);
+
+    if (msg_len > 0) {
+        memcpy(pdu->payload, msg_str, msg_len);
+    }          
+
+    return total_len;
+}
+
+static ssize_t recv_all(int fd, uint8_t *buf, size_t want) {
+    size_t got = 0;
+    while (got < want) {
+        ssize_t n = recv(fd, buf + got, want - got, 0);
+        if (n == 0) return 0;
+        if (n < 0) {
+            return -1;
+        }
+        got += (size_t)n;
+    }
+    return (ssize_t)got;
 }
