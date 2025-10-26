@@ -172,10 +172,13 @@
 #include "crypto-client.h"
 #include "crypto-lib.h"
 #include "protocol.h"
+#include <inttypes.h>
 
 static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
 static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
 static ssize_t recv_all(int fd, uint8_t *buf, size_t want);
+static uint8_t compute_hash(const char *message, size_t len);
+static void print_msg_info_with_signature(crypto_msg_t *msg, crypto_key_t key, int mode, const char * decrypted_string);
 
 /* =============================================================================
  * STUDENT TODO: IMPLEMENT THIS FUNCTION
@@ -277,7 +280,7 @@ int client_loop(int sockfd) {
                     did_send = 1;
                     int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
                     crypto_msg_t* wire = (crypto_msg_t*)send_buff;
-                    uint16_t msg_len = ntohs(wire->header.payload_len);
+                    
 
                     if (session_key == NULL_CRYPTO_KEY) {
                         printf("[ERROR] No session key established. Cannot send encrypted data.\n\n");
@@ -292,6 +295,7 @@ int client_loop(int sockfd) {
                             size_of_pdu = (int)(sizeof(crypto_pdu_t) + (size_t)encrypted_length);   
                         }
                     }
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
 
                     // request printing
                     uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
@@ -306,9 +310,57 @@ int client_loop(int sockfd) {
                     send(sockfd, send_buff, size_of_pdu, 0);
                     break;
                 }
-                case MSG_DIG_SIGNATURE:
-                    did_send = 0;
+                case MSG_DIG_SIGNATURE: {
+                    did_send = 1;
+                    int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+                    crypto_msg_t* wire = (crypto_msg_t*)send_buff;
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
+                    uint8_t encrypted_hash;
+                    uint8_t encrypted_msg[MAX_MSG_DATA_SIZE];
+                    int encrypted_length;
+
+                    if (session_key == NULL_CRYPTO_KEY) {
+                        printf("[ERROR] No session key established. Cannot send encrypted data.\n\n");
+                        did_send = 0;
+                        continue;
+                    } else {
+                        // encrypt payload
+                        encrypted_length = encrypt_string(session_key, encrypted_msg, (uint8_t*)command.cmd_line, strlen(command.cmd_line));
+                        
+                        // encrypt hash
+                        uint8_t hash = compute_hash(command.cmd_line, strlen(command.cmd_line));
+                        hash &= 0x3F;
+                        int encrypt_hash_rc = encrypt(session_key, &encrypted_hash, &hash, 1);
+                        if (encrypt_hash_rc == RC_INVALID_ARGS) {
+                            printf("[ERROR] Invalid arguments when encrypting hash.\n\n");
+                        } else if (encrypt_hash_rc == RC_INVALID_TEXT) {
+                            printf("[ERROR] Invalid key when encrypting hash.\n\n");
+                        }
+                        if (encrypted_length > 0) {
+                            memcpy(wire->payload + 1, encrypted_msg, (size_t)encrypted_length);
+                            wire->header.payload_len = htons((uint16_t)(encrypted_length + 1));
+                            size_of_pdu = (int)(sizeof(crypto_pdu_t) + 1 + (size_t)encrypted_length);   
+                        }
+                    }
+
+                    wire->header.msg_type = MSG_DIG_SIGNATURE;
+                    wire->header.direction = DIR_REQUEST;
+                    wire->payload[0] = encrypted_hash;
+                    memcpy(&wire->payload[1], encrypted_msg, encrypted_length);
+
+                    // request printing
+                    uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                    crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
+                    print_out->header.msg_type = wire->header.msg_type;
+                    print_out->header.direction = wire->header.direction;
+                    print_out->header.payload_len = encrypted_length + 1; 
+                    memcpy(print_out->payload, wire->payload, msg_len);
+                    print_out->payload[msg_len] = '\0';
+                    print_msg_info(print_out, session_key, CLIENT_MODE);
+                    
+                    send(sockfd, send_buff, size_of_pdu, 0);
                     break;
+                }
                 case MSG_HELP_CMD:
                     did_send = 0;
                     break;
@@ -384,16 +436,6 @@ int client_loop(int sockfd) {
             crypto_msg_t *wire_in = (crypto_msg_t*)recv_buff;
             uint16_t msg_len_in = ntohs(wire_in->header.payload_len);
 
-            // print response 
-            uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
-            crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
-            print_in->header.msg_type = wire_in->header.msg_type;
-            print_in->header.direction = wire_in->header.direction;
-            print_in->header.payload_len = msg_len_in;
-            memcpy(print_in->payload, wire_in->payload, msg_len_in);
-            print_in->payload[msg_len_in] = '\0';
-            print_msg_info(print_in, session_key, CLIENT_MODE);
-
             switch (wire_in->header.msg_type) {
                 case MSG_KEY_EXCHANGE:
                     if (payload_length >= sizeof(crypto_key_t)) {
@@ -407,13 +449,56 @@ int client_loop(int sockfd) {
                         decrypted[decrypted_length] = '\0';
                     }
                     break;
+                case MSG_DIG_SIGNATURE: {
+
+                    uint8_t encrypted_sig = wire_in->payload[0];
+                    uint8_t received_hash;
+                    decrypt(session_key, &received_hash, &encrypted_sig, 1);
+                    
+
+                    uint8_t decrypted[MAX_MSG_DATA_SIZE];
+                    int decrypted_length = decrypt_string(session_key, decrypted, wire_in->payload+1, msg_len_in-1);
+                    if (decrypted_length > 0) {
+                        decrypted[decrypted_length] = '\0';
+                    }
+
+                    uint8_t computed_hash = compute_hash((const char *)decrypted, (size_t)decrypted_length);
+                    computed_hash &= 0x3F;
+
+                    if (received_hash != computed_hash) {
+                        printf("[WARNING] Server response signature invalid!\n");
+                    } else {
+                        uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                        crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
+                        print_in->header.msg_type = wire_in->header.msg_type;
+                        print_in->header.direction = wire_in->header.direction;
+                        print_in->header.payload_len = msg_len_in;
+                        memcpy(print_in->payload, wire_in->payload, msg_len_in);
+                        print_in->payload[msg_len_in] = '\0';
+                        print_msg_info_with_signature(print_in, session_key, CLIENT_MODE, (const char *)decrypted);
+                        continue;
+                    }
+                    break;
+                }
                 case MSG_EXIT:
                     return 0;
                 case MSG_SHUTDOWN:
                     return 0;
+                case MSG_DATA:
+                    break;
                 default:
                     continue;
             }
+
+            // print response 
+            uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+            crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
+            print_in->header.msg_type = wire_in->header.msg_type;
+            print_in->header.direction = wire_in->header.direction;
+            print_in->header.payload_len = msg_len_in;
+            memcpy(print_in->payload, wire_in->payload, msg_len_in);
+            print_in->payload[msg_len_in] = '\0';
+            print_msg_info(print_in, session_key, CLIENT_MODE);
 
         } else {
             continue;
@@ -487,11 +572,10 @@ int get_command(char *cmd_buff, size_t cmd_buff_sz, msg_cmd_t *msg_cmd)
             return CMD_EXECUTE;
             
         case '$':
-            // Digital signature (not implemented in this assignment)
+            // Digital signature (I did implement this!)
             msg_cmd->cmd_id = MSG_DIG_SIGNATURE;
-            msg_cmd->cmd_line = NULL;
-            printf("[INFO] Digital signature command not implemented yet.\n\n");
-            return CMD_NO_EXEC;
+            msg_cmd->cmd_line = cmd_buff + 1;;
+            return CMD_EXECUTE;
             
         case '-':
             // Client exit command
@@ -563,9 +647,9 @@ static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, ch
 }
 
 static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction) {
-    if (!pdu_buff) {                           // NEW: allow msg_str == NULL for 0-length payloads
-        return -1;                             // NEW
-    }                                          // NEW
+    if (!pdu_buff) {
+        return -1;
+    } 
 
     uint16_t msg_len = msg_str ? (uint16_t)strlen(msg_str) : 0;
     uint16_t total_len = (uint16_t)(sizeof(crypto_pdu_t) + msg_len);
@@ -598,4 +682,123 @@ static ssize_t recv_all(int fd, uint8_t *buf, size_t want) {
         got += (size_t)n;
     }
     return (ssize_t)got;
+}
+
+static uint8_t compute_hash(const char *message, size_t len) {
+    uint8_t hash = 0;
+    for (size_t i = 0; i < len; i++) {
+        hash ^= message[i];
+        hash = (hash << 1) | (hash >> 7);
+    }
+    return hash;
+}
+
+static void print_msg_info_with_signature(crypto_msg_t *msg, crypto_key_t key, int mode, const char * decrypted_string) {
+    if (msg == NULL) return;
+
+    const crypto_pdu_t *pdu = &msg->header;
+
+    if(pdu->direction == DIR_REQUEST) {
+        printf(">>>>>>>>>>>>>>> REQUEST >>>>>>>>>>>>>>>\n");
+    } else {
+        printf("<<<<<<<<<<<<<<< RESPONSE <<<<<<<<<<<<<<<\n");
+    }
+    
+    printf("-------------------------\nPDU Info:\n");
+    
+    // Print message type
+    printf("  Type: ");
+    switch(pdu->msg_type) {
+        case MSG_KEY_EXCHANGE:     printf("KEY_EXCHANGE"); break;
+        case MSG_DATA:             printf("DATA"); break;
+        case MSG_ENCRYPTED_DATA:   printf("ENCRYPTED_DATA"); break;
+        case MSG_DIG_SIGNATURE:    printf("DIGITAL_SIGNATURE"); break;
+        case MSG_HELP_CMD:         printf("HELP_CMD"); break;
+        case MSG_CMD_CLIENT_STOP:  printf("CMD_CLIENT_STOP"); break;
+        case MSG_CMD_SERVER_STOP:  printf("CMD_SERVER_STOP"); break;
+        case MSG_ERROR:            printf("ERROR"); break;
+        case MSG_EXIT:             printf("EXIT"); break;
+        case MSG_SHUTDOWN:         printf("SHUTDOWN"); break;
+        default:                   printf("UNKNOWN(%d)", pdu->msg_type); break;
+    }
+    printf("\n");
+    
+    // Print direction
+    printf("  Direction: %s\n", 
+           pdu->direction == DIR_REQUEST ? "REQUEST" : "RESPONSE");
+    
+    // Print payload length
+    printf("  Payload Length: %u bytes\n", pdu->payload_len);
+
+    if (pdu->payload_len > 0) {
+        switch(pdu->msg_type) {
+            case MSG_KEY_EXCHANGE:
+                if (pdu->payload_len == sizeof(crypto_key_t)) {
+                    crypto_key_t *keys = (crypto_key_t *)msg->payload;
+                    printf("  Payload: Key=0x%04x\n", keys[0]);
+                } else {
+                    printf("  Payload: Invalid length for KEY_EXCHANGE\n");
+                }
+                break;
+            case MSG_DATA:
+                printf("  Payload (plaintext): %*s\n",pdu->payload_len, msg->payload);
+                break;
+            case MSG_ENCRYPTED_DATA:
+                if (key == NULL_CRYPTO_KEY) {
+                    printf("  Payload: Encrypted data but invalid key provided to decrypt\n");
+                    break;
+                }
+                uint8_t *msg_data = malloc(pdu->payload_len + 1);
+                if (printable_encrypted_string((uint8_t *)msg->payload, msg_data, pdu->payload_len) == RC_OK) {
+                    msg_data[pdu->payload_len] = '\0'; // Null-terminate
+                    printf("  Payload (encrypted): \"%s\"\n", msg_data);
+
+                    //Since the keys are asymentric we only can print the decryted string on the REQUEST
+                    //to the server or RESPONSE FROM the client
+                    if ((mode == SERVER_MODE && pdu->direction == DIR_REQUEST) ||
+                        (mode == CLIENT_MODE && pdu->direction == DIR_RESPONSE)) {
+
+                        if(decrypt_string(key, msg_data, msg->payload, pdu->payload_len) > 0) {
+                            msg_data[pdu->payload_len] = '\0'; // Null-terminate
+                            printf("  Payload (decrypted): \"%s\"\n", msg_data);
+                        } else {
+                            printf("  Payload: Decryption error\n");
+                        }
+
+                    }
+
+
+                    
+
+                } else {
+                    printf("  Payload: Invalid data\n");
+                }
+                free(msg_data);
+                break;
+            case MSG_DIG_SIGNATURE:
+                printf("  Payload: Digital Signature (%u bytes)\n", pdu->payload_len);
+                printf("  Message: %s\n", decrypted_string);
+                printf("✓ Server signature verified!\n");
+                break;
+            case MSG_HELP_CMD:
+            case MSG_CMD_CLIENT_STOP:
+            case MSG_CMD_SERVER_STOP:
+            case MSG_ERROR:
+            case MSG_EXIT:
+            case MSG_SHUTDOWN:
+                printf("  Payload: Command/Status (%u bytes)\n", pdu->payload_len);
+                break;
+            default:
+                printf("  Payload: Unknown message type (%u bytes)\n", pdu->payload_len);
+                break;
+        }
+    } else {
+        printf("  No Payload\n");
+    }
+
+    if(pdu->direction == DIR_REQUEST) {
+        printf(">>>>>>>>>>>>> END REQUEST >>>>>>>>>>>>>\n\n");
+    } else {
+        printf("<<<<<<<<<<<<< END RESPONSE <<<<<<<<<<<<<\n\n");
+    }
 }

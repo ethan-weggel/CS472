@@ -227,9 +227,11 @@
 #include "crypto-lib.h"
 #include "protocol.h"
 #include <errno.h>
+#include <inttypes.h>
 
 static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
 static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
+static uint8_t compute_hash(const char *message, size_t len);
 
 
 /* =============================================================================
@@ -363,6 +365,77 @@ int service_client_loop(int client_socket) {
                     (void)bytes_sent;
                     continue;
                 }
+                case MSG_DIG_SIGNATURE: {
+                    uint8_t decrypted[MAX_MSG_DATA_SIZE];
+                    uint8_t encrypted_sig;
+                    uint8_t computed_hash;
+                    uint8_t received_hash;
+                    uint8_t encrypted[MAX_MSG_DATA_SIZE];
+                    uint16_t in_len = ntohs(pdu->header.payload_len);  
+
+                    encrypted_sig = pdu->payload[0];
+                    decrypt(server_key, &received_hash, &encrypted_sig, 1);
+
+                    int decrypted_length = decrypt_string(server_key, decrypted, pdu->payload+1, in_len-1);
+                    if (decrypted_length > 0) {
+                        decrypted[decrypted_length] = '\0';
+                    }
+
+                    computed_hash = compute_hash((const char *)decrypted, (size_t)decrypted_length);
+                    computed_hash &= 0x3F;
+
+                    if (received_hash != computed_hash) {
+                        printf("[ERROR] Digital signature verification failed!\n");
+                        pdu->header.msg_type = MSG_ERROR;
+                        pdu->header.direction = DIR_RESPONSE;
+                        memset(pdu->payload, 0, in_len);  
+                        send(client_socket, pdu_buff, sizeof(crypto_msg_t) + in_len, 0);
+                    }
+
+                    char echo_msg[MAX_MSG_DATA_SIZE];
+                    int echo_ret_len = snprintf(echo_msg, sizeof(echo_msg), "echo %s", decrypted);
+                    if (echo_ret_len < 0) {
+                        echo_ret_len = 0;
+                    }
+                    if (echo_ret_len >= (int)sizeof(echo_msg)) {
+                        echo_ret_len = (int)sizeof(echo_msg) - 1;
+                    }
+
+                    uint8_t response_hash;
+                    uint8_t encrypted_response_hash;
+                    response_hash = compute_hash(echo_msg, echo_ret_len);
+                    response_hash &= 0x3F;
+                    int encrypt_response_hash_rc = encrypt(server_key, &encrypted_response_hash, &response_hash, 1);
+                    if (encrypt_response_hash_rc == RC_INVALID_ARGS) {
+                        printf("[ERROR] Invalid arguments when encrypting hash.\n\n");
+                        pdu->header.msg_type = MSG_ERROR;
+                        pdu->header.direction = DIR_RESPONSE;
+                        memset(pdu->payload, 0, in_len);  
+                        send(client_socket, pdu_buff, sizeof(crypto_msg_t) + in_len, 0);
+                    } else if (encrypt_response_hash_rc == RC_INVALID_TEXT) {
+                        printf("[ERROR] Invalid key when encrypting hash.\n\n");
+                        pdu->header.msg_type = MSG_ERROR;
+                        pdu->header.direction = DIR_RESPONSE;
+                        memset(pdu->payload, 0, in_len);  
+                        send(client_socket, pdu_buff, sizeof(crypto_msg_t) + in_len, 0);
+                    }
+
+                    int encrypted_length = encrypt_string(server_key, encrypted, (uint8_t*)echo_msg, (size_t)echo_ret_len);
+                    if (encrypted_length > 0) {
+                        pdu->payload[0] = encrypted_response_hash;
+                        memcpy(pdu->payload+1, encrypted, encrypted_length);
+                        pdu->header.payload_len = encrypted_length;
+                    }
+
+                    pdu->header.msg_type = MSG_DIG_SIGNATURE;
+                    pdu->header.direction = DIR_RESPONSE;
+                    pdu->header.payload_len = htons((uint16_t)(encrypted_length + 1));
+                    size_t total_pdu_echo_len = sizeof(crypto_pdu_t) + 1 + (size_t)encrypted_length;
+
+                    ssize_t bytes_sent = send(client_socket, pdu_buff, total_pdu_echo_len, 0);
+                    (void)bytes_sent;
+                    continue;
+                }
                 case MSG_CMD_SERVER_STOP:
                     pdu->header.direction = DIR_RESPONSE;
                     pdu->header.msg_type = MSG_SHUTDOWN;
@@ -482,4 +555,13 @@ static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t
     } 
 
     return total_len;
+}
+
+static uint8_t compute_hash(const char *message, size_t len) {
+    uint8_t hash = 0;
+    for (size_t i = 0; i < len; i++) {
+        hash ^= message[i];
+        hash = (hash << 1) | (hash >> 7);
+    }
+    return hash;
 }
