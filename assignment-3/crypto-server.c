@@ -296,6 +296,7 @@ int server_loop(int server_socket, const char* addr, int port) {
 
 int service_client_loop(int client_socket) {
     char pdu_buff[BUFFER_SIZE];
+    crypto_key_t server_key, client_key;
     
     while (1) {
         ssize_t bytes_read = recv(client_socket, pdu_buff, sizeof(pdu_buff), 0);
@@ -311,13 +312,59 @@ int service_client_loop(int client_socket) {
             }
 
             crypto_msg_t *pdu = (crypto_msg_t *)pdu_buff;
-            pdu->header.direction = DIR_RESPONSE;
+            
 
             switch (pdu->header.msg_type) {
-                case MSG_CMD_CLIENT_STOP:
-                    pdu->header.msg_type = MSG_EXIT;
-                    break;
+                case MSG_KEY_EXCHANGE:
+                    pdu->header.msg_type = MSG_KEY_EXCHANGE;
+                    pdu->header.direction = DIR_RESPONSE;
+                    pdu->header.payload_len = htons((uint16_t)sizeof(crypto_key_t));
+                    if (gen_key_pair(&server_key, &client_key) == RC_OK) {
+                        memcpy(pdu->payload, &client_key, sizeof(crypto_key_t));
+                    } else {
+                        char err_str[] = "Error generating key exchange...";
+                        memcpy(pdu->payload, err_str, sizeof(err_str));
+                        send(client_socket, pdu_buff, sizeof(crypto_pdu_t) + sizeof(err_str), 0);
+                        continue;
+                    }
+                    send(client_socket, pdu_buff, sizeof(crypto_pdu_t) + sizeof(crypto_key_t), 0);
+                    continue;
+                case MSG_ENCRYPTED_DATA: {
+                    uint8_t decrypted[MAX_MSG_DATA_SIZE];
+                    uint8_t encrypted[MAX_MSG_DATA_SIZE];
+                    uint16_t in_len = ntohs(pdu->header.payload_len);  
+
+                    int decrypted_length = decrypt_string(server_key, decrypted, pdu->payload, in_len);
+                    if (decrypted_length > 0) {
+                        decrypted[decrypted_length] = '\0';
+                    }
+
+                    char echo_msg[MAX_MSG_DATA_SIZE];
+                    int echo_ret_len = snprintf(echo_msg, sizeof(echo_msg), "echo %s", decrypted);
+                    if (echo_ret_len < 0) {
+                        echo_ret_len = 0;
+                    }
+                    if (echo_ret_len >= (int)sizeof(echo_msg)) {
+                        echo_ret_len = (int)sizeof(echo_msg) - 1;
+                    }
+
+                    int encrypted_length = encrypt_string(server_key, encrypted, (uint8_t*)echo_msg, (size_t)echo_ret_len);
+                    if (encrypted_length > 0) {
+                        memcpy(pdu->payload, encrypted, encrypted_length);
+                        pdu->header.payload_len = encrypted_length;
+                    }
+
+                    pdu->header.msg_type = MSG_ENCRYPTED_DATA;
+                    pdu->header.direction = DIR_RESPONSE;
+                    pdu->header.payload_len = htons((uint16_t)encrypted_length);
+                    size_t total_pdu_echo_len = sizeof(crypto_pdu_t) + (size_t)encrypted_length;
+
+                    ssize_t bytes_sent = send(client_socket, pdu_buff, total_pdu_echo_len, 0);
+                    (void)bytes_sent;
+                    continue;
+                }
                 case MSG_CMD_SERVER_STOP:
+                    pdu->header.direction = DIR_RESPONSE;
                     pdu->header.msg_type = MSG_SHUTDOWN;
                     ssize_t bytes_sent = send(client_socket, pdu_buff, (size_t)bytes_read, 0);
                     (void)bytes_sent;
@@ -325,10 +372,25 @@ int service_client_loop(int client_socket) {
                     return 10;
                 default:
                     pdu->header.msg_type = MSG_DATA;
+                    pdu->header.direction = DIR_RESPONSE;
                     break;
             }
 
-            ssize_t bytes_sent = send(client_socket, pdu_buff, (size_t)bytes_read, 0);
+            char echo_msg[MAX_MSG_DATA_SIZE];
+            int echo_ret_len = snprintf(echo_msg, sizeof(echo_msg), "echo %s", msg_str);
+            if (echo_ret_len < 0) {
+                echo_ret_len = 0;
+            }
+            if (echo_ret_len >= (int)sizeof(echo_msg)) {
+                echo_ret_len = (int)sizeof(echo_msg) - 1;
+            }
+
+            pdu->header.direction   = DIR_RESPONSE;
+            pdu->header.payload_len = htons((uint16_t)echo_ret_len);
+            memcpy(pdu->payload, echo_msg, (size_t)echo_ret_len);
+            size_t total_pdu_echo_len = sizeof(crypto_pdu_t) + (size_t)echo_ret_len;
+
+            ssize_t bytes_sent = send(client_socket, pdu_buff, total_pdu_echo_len, 0);
             (void)bytes_sent;
             continue;
 

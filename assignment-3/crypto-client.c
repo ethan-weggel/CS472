@@ -173,7 +173,6 @@
 #include "crypto-lib.h"
 #include "protocol.h"
 
-/* NEW CODE ONLY: file-local prototypes to avoid multiple definition at link time */
 static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
 static int crypto_pdu_from_cstr(const char* msg_str, uint8_t* pdu_buff, uint16_t pdu_buff_sz, uint8_t msg_type, uint8_t direction);
 static ssize_t recv_all(int fd, uint8_t *buf, size_t want);
@@ -232,6 +231,8 @@ int client_loop(int sockfd) {
 
     while (1) {
         msg_cmd_t command;
+        int did_send = 0;
+
         int result = get_command(input, MAX_MSG_DATA_SIZE, &command);
         if (result == CMD_EXECUTE) {
 
@@ -243,22 +244,119 @@ int client_loop(int sockfd) {
                 continue;
             }
 
-            // sends data
-            int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
-            crypto_msg_t *wire = (crypto_msg_t*)send_buff;
-            uint16_t msg_len = ntohs(wire->header.payload_len);
+            if (command.cmd_line && strcmp(command.cmd_line, "exit") == 0) {
+                command.cmd_id = MSG_CMD_CLIENT_STOP;
+                command.cmd_line = NULL;
+            } else if (command.cmd_line && strcmp(command.cmd_line, "exit server") == 0) {
+                command.cmd_id = MSG_CMD_SERVER_STOP;
+                command.cmd_line = NULL;
+            }
 
-            // request printing
-            uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
-            crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
-            print_out->header.msg_type = wire->header.msg_type;
-            print_out->header.direction = wire->header.direction;
-            print_out->header.payload_len = msg_len; 
-            memcpy(print_out->payload, wire->payload, msg_len);
-            print_out->payload[msg_len] = '\0';
-            print_msg_info(print_out, session_key, CLIENT_MODE);
+            switch (command.cmd_id) {
+                case MSG_KEY_EXCHANGE: {
+                    did_send = 1;
+                    int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+                    crypto_msg_t *wire = (crypto_msg_t*)send_buff;
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
 
-            send(sockfd, send_buff, size_of_pdu, 0);
+                    // request printing
+                    uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                    crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
+                    print_out->header.msg_type = wire->header.msg_type;
+                    print_out->header.direction = wire->header.direction;
+                    print_out->header.payload_len = msg_len; 
+                    memcpy(print_out->payload, wire->payload, msg_len);
+                    print_out->payload[msg_len] = '\0';
+                    print_msg_info(print_out, session_key, CLIENT_MODE);
+
+                    send(sockfd, send_buff, size_of_pdu, 0);  
+                    break;
+                } 
+                case MSG_ENCRYPTED_DATA: {
+
+                    did_send = 1;
+                    int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+                    crypto_msg_t* wire = (crypto_msg_t*)send_buff;
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
+
+                    if (session_key == NULL_CRYPTO_KEY) {
+                        printf("[ERROR] No session key established. Cannot send encrypted data.\n\n");
+                        did_send = 0;
+                        continue;
+                    } else {
+                        uint8_t encrypted[MAX_MSG_DATA_SIZE];
+                        int encrypted_length = encrypt_string(session_key, encrypted, (uint8_t*)command.cmd_line, strlen(command.cmd_line));
+                        if (encrypted_length > 0) {
+                            memcpy(wire->payload, encrypted, (size_t)encrypted_length);
+                            wire->header.payload_len = htons((uint16_t)encrypted_length);
+                            size_of_pdu = (int)(sizeof(crypto_pdu_t) + (size_t)encrypted_length);   
+                        }
+                    }
+
+                    // request printing
+                    uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                    crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
+                    print_out->header.msg_type = wire->header.msg_type;
+                    print_out->header.direction = wire->header.direction;
+                    print_out->header.payload_len = msg_len; 
+                    memcpy(print_out->payload, wire->payload, msg_len);
+                    print_out->payload[msg_len] = '\0';
+                    print_msg_info(print_out, session_key, CLIENT_MODE);
+                    
+                    send(sockfd, send_buff, size_of_pdu, 0);
+                    break;
+                }
+                case MSG_DIG_SIGNATURE:
+                    did_send = 0;
+                    break;
+                case MSG_HELP_CMD:
+                    did_send = 0;
+                    break;
+                case MSG_CMD_CLIENT_STOP: {
+                    // sends data 
+                    int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+                    crypto_msg_t* wire = (crypto_msg_t*)send_buff;
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
+
+                    // request printing
+                    uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                    crypto_msg_t* print_out = (crypto_msg_t*)tmp_out;
+                    print_out->header.msg_type = wire->header.msg_type;
+                    print_out->header.direction = wire->header.direction;
+                    print_out->header.payload_len = msg_len; 
+                    memcpy(print_out->payload, wire->payload, msg_len);
+                    print_out->payload[msg_len] = '\0';
+                    print_msg_info(print_out, session_key, CLIENT_MODE);
+
+                    send(sockfd, send_buff, size_of_pdu, 0);
+                    did_send = 0;
+                    return 0;
+                }
+                default: {
+                    // sends data
+                    int size_of_pdu = crypto_pdu_from_cstr(command.cmd_line, send_buff, MAX_MSG_SIZE, command.cmd_id, DIR_REQUEST);
+                    crypto_msg_t *wire = (crypto_msg_t*)send_buff;
+                    uint16_t msg_len = ntohs(wire->header.payload_len);
+
+                    // request printing
+                    uint8_t tmp_out[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+                    crypto_msg_t *print_out = (crypto_msg_t*)tmp_out;
+                    print_out->header.msg_type = wire->header.msg_type;
+                    print_out->header.direction = wire->header.direction;
+                    print_out->header.payload_len = msg_len; 
+                    memcpy(print_out->payload, wire->payload, msg_len);
+                    print_out->payload[msg_len] = '\0';
+                    print_msg_info(print_out, session_key, CLIENT_MODE);
+
+                    send(sockfd, send_buff, size_of_pdu, 0);
+                    did_send = 1;
+                    break;
+                }
+            }
+
+            if (!did_send) {
+                continue;
+            }
 
             // receives header
             uint8_t msg_type, direction;
@@ -281,6 +379,7 @@ int client_loop(int sockfd) {
                 }
             }
 
+
             extract_crypto_msg_data(recv_buff, (sizeof(crypto_pdu_t) + payload_length), msg, MAX_MSG_DATA_SIZE, &msg_type, &direction);
             crypto_msg_t *wire_in = (crypto_msg_t*)recv_buff;
             uint16_t msg_len_in = ntohs(wire_in->header.payload_len);
@@ -293,10 +392,27 @@ int client_loop(int sockfd) {
             print_in->header.payload_len = msg_len_in;
             memcpy(print_in->payload, wire_in->payload, msg_len_in);
             print_in->payload[msg_len_in] = '\0';
-            print_msg_info(print_in, session_key, SERVER_MODE);
+            print_msg_info(print_in, session_key, CLIENT_MODE);
 
-            if (wire_in->header.msg_type == MSG_EXIT || wire_in->header.msg_type == MSG_SHUTDOWN) {
-                return 0;
+            switch (wire_in->header.msg_type) {
+                case MSG_KEY_EXCHANGE:
+                    if (payload_length >= sizeof(crypto_key_t)) {
+                        memcpy(&session_key, wire_in->payload, sizeof(crypto_key_t));
+                    }
+                    break;
+                case MSG_ENCRYPTED_DATA:
+                    uint8_t decrypted[MAX_MSG_DATA_SIZE];
+                    int decrypted_length = decrypt_string(session_key, decrypted, wire_in->payload, msg_len_in);
+                    if (decrypted_length > 0) {
+                        decrypted[decrypted_length] = '\0';
+                    }
+                    break;
+                case MSG_EXIT:
+                    return 0;
+                case MSG_SHUTDOWN:
+                    return 0;
+                default:
+                    continue;
             }
 
         } else {
