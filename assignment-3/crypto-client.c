@@ -106,6 +106,13 @@ int client_loop(int sockfd) {
                     } else {
                         uint8_t encrypted[MAX_MSG_DATA_SIZE];
                         int encrypted_length = encrypt_string(session_key, encrypted, (uint8_t*)command.cmd_line, strlen(command.cmd_line));
+                        if (encrypted_length == RC_INVALID_ARGS) {
+                            printf("[ERROR] Invalid arguments when encrypting message.\n\n");
+                            continue;
+                        } else if (encrypted_length == RC_INVALID_TEXT) {
+                            printf("[ERROR] Invalid text used in message.\n\n");
+                            continue;
+                        }
                         if (encrypted_length > 0) {
                             memcpy(wire->payload, encrypted, (size_t)encrypted_length);
                             wire->header.payload_len = htons((uint16_t)encrypted_length);
