@@ -132,11 +132,102 @@ Every PDU includes a `direction` field (DIR_REQUEST or DIR_RESPONSE), even thoug
 
 **Example Interactions**
 
+   *SERVER:*
+   ```
+   erw74@tux1 assignment-3> ./crypto-echo --server
+   Starting TCP server: binding to 0.0.0.0:1234
+   [ok] bind: port=1234 addr=0.0.0.0 (INADDR_ANY)
+   [ok] listen: backlog=5
+   Server listening on 0.0.0.0:1234...
+   Client connected...
+   DEBUG key 1: e1=17(23), d1=27(39)
+   DEBUG key 2: e2=09(9), d2=39(57)
+   DEBUG FULL KEY: k1:3917 k2:2709
+   ```
 
+   *CLIENT:*
+   ```
+   erw74@tux1 assignment-3> ./crypto-echo --client
+   Starting TCP client: connecting to 127.0.0.1:1234
+   connected to server 127.0.0.1:1234
+   Type messages to send to server.
+   Type 'exit' to quit, or 'exit server' to shutdown the server.
+   Press Ctrl+C to exit at any time.
+
+   > #
+   >>>>>>>>>>>>>>> REQUEST >>>>>>>>>>>>>>>
+   -------------------------
+   PDU Info:
+   Type: KEY_EXCHANGE
+   Direction: REQUEST
+   Payload Length: 0 bytes
+   No Payload
+   >>>>>>>>>>>>> END REQUEST >>>>>>>>>>>>>
+
+   <<<<<<<<<<<<<<< RESPONSE <<<<<<<<<<<<<<<
+   -------------------------
+   PDU Info:
+   Type: KEY_EXCHANGE
+   Direction: RESPONSE
+   Payload Length: 2 bytes
+   Payload: Key=0x2709
+   <<<<<<<<<<<<< END RESPONSE <<<<<<<<<<<<<
+
+   > $This is an example interaction
+   [INFO] Computing signature...
+   [INFO] Signature: 0x04
+   >>>>>>>>>>>>>>> REQUEST >>>>>>>>>>>>>>>
+   -------------------------
+   PDU Info:
+   Type: DIGITAL_SIGNATURE
+   Direction: REQUEST
+   Payload Length: 30 bytes
+   Signature byte: 0x04
+   Payload (encrypted): "clHu0yu0y2xyS32K,jSyuxbSN2EbuY"
+   >>>>>>>>>>>>> END REQUEST >>>>>>>>>>>>>
+
+   <<<<<<<<<<<<<<< RESPONSE <<<<<<<<<<<<<<<
+   -------------------------
+   PDU Info:
+   Type: DIGITAL_SIGNATURE
+   Direction: RESPONSE
+   Payload Length: 35 bytes
+   Signature byte: 0x0d
+   Payload (encrypted): "lu8ZoO7ZSMOSMOKvOupK2h9uOSvFuTK8FSo"
+   Payload (decrypted): "echo This is an example interaction"
+   ✓ Server signature verified!
+   <<<<<<<<<<<<< END RESPONSE <<<<<<<<<<<<<
+
+   > 
+   ```
 
 **Signature Verification Failure**
 
+   If signature verification was to fail, meaning we decrypt using our session keys and the hashed byte prepending the payload does not match up we will not print our message and will continue onwards. 
+
+   ```
+   if (received_hash != computed_hash) {
+      printf("[WARNING] Server response signature invalid!\n");
+   } else {
+      uint8_t tmp_in[sizeof(crypto_pdu_t) + MAX_MSG_DATA_SIZE];
+      crypto_msg_t *print_in = (crypto_msg_t*)tmp_in;
+      print_in->header.msg_type = wire_in->header.msg_type;
+      print_in->header.direction = wire_in->header.direction;
+      print_in->header.payload_len = msg_len_in;
+      memcpy(print_in->payload, wire_in->payload, msg_len_in);
+      print_in->payload[msg_len_in] = '\0';
+      print_msg_info_with_signature(print_in, session_key, CLIENT_MODE, computed_hash, 1);
+      continue;
+   }
+   break;
+   ```
+
+   This means we receive the server's message and extract the encrypted first byte of the payload (or really the byte before the important message part of the payload begins). Then we decrypt it and we receive a hash of "some message", that message being potentially anything. Once we read in the payload, we rehash it to see if we get the same hash we decrypted earlier. If we have a match then we know that we have the same message that was originally sent! If we have a mismatch, then we know to discard because the source is incredible.
+
 **Tampering Prevention**
+
+   This is critical when preventing tampering because if we have the server's hash of the message it sent, then theoretically/ideally, only that same message will give us the same hash if our hash function is good. And because we generally cannot tell what hash function is used and can't reverse engineer it back to the original message, when we hash the message appended after the server's hash and they match then we know the message is the truth. If it is a different computed hash, we can be certain that the message did NOT come from the server since the signature is different. This is very important when revealing sensitive information and trusting companies or people are who they say they are AND that messages are not intercepted and altered in some way between entities.
+
 
 ---
 
