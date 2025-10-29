@@ -39,20 +39,20 @@ void start_server(const char* addr, int port) {
     }
 
     if (bind(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("[error] bind");
+        perror("[ERROR] bind");
         close(sockfd);
         return;
     } else {
-        printf("[ok] bind: port=%d addr=%s\n",
+        printf("[OK] bind: port = %d addr = %s\n",
                port, strcmp(addr, "0.0.0.0") == 0 ? "0.0.0.0 (INADDR_ANY)" : addr);
     }
 
     if (listen(sockfd, BACKLOG) < 0) {
-        perror("[error] listen");
+        perror("[ERROR] listen");
         close(sockfd);
         return;
     } else {
-        printf("[ok] listen: backlog=%d\n", BACKLOG);
+        printf("[OK] listen: backlog = %d\n", BACKLOG);
     }
 
     int rc = server_loop(sockfd, addr, port);
@@ -218,6 +218,15 @@ int service_client_loop(int client_socket) {
                     (void)bytes_sent;
                     printf("Shutting down server...\n");
                     return 10;
+                }
+                case MSG_CMD_CLIENT_STOP: {
+                    pdu->header.direction = DIR_RESPONSE;
+                    pdu->header.msg_type = MSG_EXIT;
+                    ssize_t bytes_sent = send_all(client_socket, pdu_buff, (size_t)bytes_read);
+                    (void)bytes_sent;
+                    close(client_socket);
+                    printf("Client disconnected...\n");
+                    return RC_CLIENT_EXITED;
                 }
                 default: {
                     pdu->header.msg_type = MSG_DATA;

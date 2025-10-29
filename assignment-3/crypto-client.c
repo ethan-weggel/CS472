@@ -186,10 +186,11 @@ int client_loop(int sockfd) {
                     crypto_msg_t* wire = (crypto_msg_t*)send_buff;
 
                     print_msg_like(wire, session_key, CLIENT_MODE);
+                    printf("Exiting client...\n");
 
                     send_all(sockfd, send_buff, size_of_pdu);
-                    did_send = 0;
-                    return 0;
+                    did_send = 1;
+                    break;
                 }
                 default: {
                     // sends data
@@ -281,6 +282,7 @@ int client_loop(int sockfd) {
                     break;
                 }
                 case MSG_EXIT:
+                    printf("Client disconnected.\n");
                     return 0;
                 case MSG_SHUTDOWN:
                     return 0;
