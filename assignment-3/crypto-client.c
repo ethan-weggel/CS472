@@ -16,9 +16,9 @@ static ssize_t recv_all(int fd, uint8_t *buf, size_t want);
 static uint8_t compute_hash(const char *message, size_t len);
 static void print_msg_info_with_signature(crypto_msg_t *msg, crypto_key_t key, int mode, uint8_t signature_byte, int verified);
 static ssize_t send_all(int sockfd, uint8_t* buffer, size_t length);
-
-
 static void print_msg_like(crypto_msg_t *wire, crypto_key_t key, int mode);
+
+
 void start_client(const char* addr, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -228,18 +228,20 @@ int client_loop(int sockfd) {
             uint16_t msg_len_in = ntohs(wire_in->header.payload_len);
 
             switch (wire_in->header.msg_type) {
-                case MSG_KEY_EXCHANGE:
+                case MSG_KEY_EXCHANGE: {
                     if (payload_length >= sizeof(crypto_key_t)) {
                         memcpy(&session_key, wire_in->payload, sizeof(crypto_key_t));
                     }
                     break;
-                case MSG_ENCRYPTED_DATA:
+                }
+                case MSG_ENCRYPTED_DATA: {
                     uint8_t decrypted[MAX_MSG_DATA_SIZE];
                     int decrypted_length = decrypt_string(session_key, decrypted, wire_in->payload, msg_len_in);
                     if (decrypted_length > 0) {
                         decrypted[decrypted_length] = '\0';
                     }
                     break;
+                }
                 case MSG_DIG_SIGNATURE: {
 
                     uint8_t encrypted_sig = wire_in->payload[0];

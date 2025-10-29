@@ -14,11 +14,18 @@
 static int extract_crypto_msg_data(const uint8_t* pdu_buff, uint16_t pdu_len, char* msg_str, uint16_t max_str_len, uint8_t* out_type, uint8_t* out_dir);
 static uint8_t compute_hash(const char *message, size_t len);
 static ssize_t send_all(int sockfd, const char* buffer, size_t length);
-
-
 static int make_echo(char *dst, size_t dst_sz, const char *src);
+
+
 void start_server(const char* addr, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    
+    int reuse = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+        perror("Error setting socket options");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -31,8 +38,22 @@ void start_server(const char* addr, int port) {
         inet_pton(AF_INET, addr, &server_addr.sin_addr);
     }
 
-    bind(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr));
-    listen(sockfd, BACKLOG);
+    if (bind(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("[error] bind");
+        close(sockfd);
+        return;
+    } else {
+        printf("[ok] bind: port=%d addr=%s\n",
+               port, strcmp(addr, "0.0.0.0") == 0 ? "0.0.0.0 (INADDR_ANY)" : addr);
+    }
+
+    if (listen(sockfd, BACKLOG) < 0) {
+        perror("[error] listen");
+        close(sockfd);
+        return;
+    } else {
+        printf("[ok] listen: backlog=%d\n", BACKLOG);
+    }
 
     int rc = server_loop(sockfd, addr, port);
     printf("Server exited with return code %d\n", rc);
@@ -82,7 +103,7 @@ int service_client_loop(int client_socket) {
             
 
             switch (pdu->header.msg_type) {
-                case MSG_KEY_EXCHANGE:
+                case MSG_KEY_EXCHANGE: {
                     pdu->header.msg_type = MSG_KEY_EXCHANGE;
                     pdu->header.direction = DIR_RESPONSE;
                     pdu->header.payload_len = htons((uint16_t)sizeof(crypto_key_t));
@@ -96,6 +117,7 @@ int service_client_loop(int client_socket) {
                     }
                     send_all(client_socket, pdu_buff, sizeof(crypto_pdu_t) + sizeof(crypto_key_t));
                     continue;
+                }
                 case MSG_ENCRYPTED_DATA: {
                     uint8_t decrypted[MAX_MSG_DATA_SIZE];
                     uint8_t encrypted[MAX_MSG_DATA_SIZE];
@@ -189,17 +211,19 @@ int service_client_loop(int client_socket) {
                     (void)bytes_sent;
                     continue;
                 }
-                case MSG_CMD_SERVER_STOP:
+                case MSG_CMD_SERVER_STOP: {
                     pdu->header.direction = DIR_RESPONSE;
                     pdu->header.msg_type = MSG_SHUTDOWN;
                     ssize_t bytes_sent = send_all(client_socket, pdu_buff, (size_t)bytes_read);
                     (void)bytes_sent;
                     printf("Shutting down server...\n");
                     return 10;
-                default:
+                }
+                default: {
                     pdu->header.msg_type = MSG_DATA;
                     pdu->header.direction = DIR_RESPONSE;
                     break;
+                }
             }
 
             char echo_msg[MAX_MSG_DATA_SIZE];
