@@ -10,7 +10,7 @@
 
 char recv_buff[BUFF_SZ];
 
-char *generate_cc_request(const char *host, int port, const char *path){
+char *generate_cc_request(const char *host, int port, const char *path) {
 	static char req[512] = {0};
 	int offset = 0;
 	
@@ -25,17 +25,19 @@ char *generate_cc_request(const char *host, int port, const char *path){
 }
 
 
-void print_usage(char *exe_name){
+void print_usage(char *exe_name) {
     fprintf(stderr, "Usage: %s <hostname> <port> <path...>\n", exe_name);
     fprintf(stderr, "Using default host %s, port %d  and path [\\]\n", DEFAULT_HOST, DEFAULT_PORT); 
 }
 
-int process_request(const char *host, uint16_t port, char *resource){
+int process_request(const char *host, uint16_t port, char *resource) {
     int sock;
     int total_bytes;
 
     sock = socket_connect(host, port);
-    if(sock < 0) return sock;
+    if (sock < 0) {
+        return sock;
+    }
 
     //---------------------------------------------------------------------------------
     //TODO:   Implement Send/Receive loop for Connection:Closed
@@ -57,11 +59,37 @@ int process_request(const char *host, uint16_t port, char *resource){
     //    accumulate all of the data received and return this value. 
     //---------------------------------------------------------------------------------
 
+    // make new header
+    char* req = generate_cc_request(host, port, resource);
+
+    // validate is parsable + validate send length matches header length
+    // int header_len, content_len;
+    // int can_parse = process_http_header(req, MAX_HEADER_LINE, &header_len, &content_len);
+    // if (!can_parse) {
+    //     printf("[ERROR] Could not parse header...\n");
+    //     return -1;
+    // }
+
+    // send request + error check
+    int bytes_sent = send(sock, req, strlen(req), 0);
+    if (bytes_sent < 0) {
+        printf("[ERROR] Could not send request to server...\n");
+        return -1;
+    }
+
+    // define accumulator + loop
+    int bytes_received = 0;
+    int header_len, content_len;
+    while () {
+
+    }
+
+
     close(sock);
     return total_bytes;
 }
 
-int main(int argc, char *argv[]){
+int main(int argc, char *argv[]) {
     int sock;
 
     const char *host = DEFAULT_HOST;
@@ -71,7 +99,7 @@ int main(int argc, char *argv[]){
 
     // Command line argument processing should be all setup, you should not need
     // to modify this code
-    if(argc < 4){
+    if(argc < 4) {
         print_usage(argv[0]);
         //process the default request
         process_request(host, port, resource);
@@ -85,7 +113,7 @@ int main(int argc, char *argv[]){
         }
         fprintf(stdout, "Running with host = %s, port = %d\n", host, port);
         remaining_args = argc-3;
-        for(int i = 0; i < remaining_args; i++){
+        for (int i = 0; i < remaining_args; i++) {
             resource = argv[3+i];
             fprintf(stdout, "\n\nProcessing request for %s\n\n", resource);
             process_request(host, port, resource);
