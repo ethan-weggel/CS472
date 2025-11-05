@@ -133,7 +133,19 @@ int get_http_header_len(char *http_buff, int http_buff_len) {
 
 //  DOCUMENTATION - erw74
 //
-//  
+//  int get_http_content_len(http_buff, http_header_len) is a function that will return to us the number that is associated with
+//  the 'Content-Length' field in a given HTTP header line if it is present. If not, it will return 0 and will print
+//  an appropriate error message. To start, this function allocates a temporary char buff that can store the maximum
+//  size of HTTP header line denoted 'MAX_HEADER_LINE'. We then get pointers to the beginning of the provided http_buff and the end
+//  so that we can make a conditional to continue to loop while the beginning pointer ('next_header_line') is less than the value of 
+//  'end_header_line'. For every iteration of the loop, we copy characters from 'next_header_line' into 'header_line' until we
+//  find the characters "\r\n" which is HTTP_HEADER_EOL or the end of a header line in an HTTP response. Then we use strcasestr
+//  to do a case insensitive search by converting our needle and haystack characters to lowercase and loop through our haystack
+//  until we find a character that matches the first character of our needle. Then we check that the haystack has at least the remaining
+//  number of characters needed to match the remainder of our needle. If we find a match, we return a pointer in haystack to the beginning
+//  of the found occurrence, otherwise NULL. If we do not get NULL, then we move our starting pointer value to where our HTTP_HEADER_DELIM
+//  lies and then add one to account for the space. Then we can parse the remaining string into atoi() which will convert our ascii
+//  string version of a number into an actual integer. We then return this number and find the value of our 'Content-Length' field.
 int get_http_content_len(char *http_buff, int http_header_len) {
     char header_line[MAX_HEADER_LINE];
 
