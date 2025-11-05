@@ -32,43 +32,19 @@ void print_usage(char *exe_name) {
 
 int process_request(const char *host, uint16_t port, char *resource) {
     int sock;
-    int total_bytes;
+    int total_bytes = 0;
 
+    int current_header_sz = 0;
+    char* header_buff = (char*)malloc(current_header_sz);
+
+    // make new socket connection
     sock = socket_connect(host, port);
     if (sock < 0) {
         return sock;
     }
 
-    //---------------------------------------------------------------------------------
-    //TODO:   Implement Send/Receive loop for Connection:Closed
-    //
-    // 1. Generate the request - see the helper generate_cc_request
-    // 2. Send the request to the HTTP server, make sure the send size
-    //    matches the length of the generated request from generate_cc_request().
-    // 3. Loop and receive the response data from the server.  You must
-    //    loop, and you must save the data received inside of recv_buff.
-    // 4. Each interation through the loop print out the data you receive.
-    //    Note, the data will not be null terminated so be careful that
-    //    you use the size of the data returned to control how the data 
-    //    is printed.  Here is a format string that can help you out.
-    //  
-    //        printf("%.*s", bytes_recvd, recv_buff);
-    //
-    // 5. This function should return the total number of bytes received
-    //    from the server, so why you are looping around, make sure to
-    //    accumulate all of the data received and return this value. 
-    //---------------------------------------------------------------------------------
-
-    // make new header
+    // make new request
     char* req = generate_cc_request(host, port, resource);
-
-    // validate is parsable + validate send length matches header length
-    // int header_len, content_len;
-    // int can_parse = process_http_header(req, MAX_HEADER_LINE, &header_len, &content_len);
-    // if (!can_parse) {
-    //     printf("[ERROR] Could not parse header...\n");
-    //     return -1;
-    // }
 
     // send request + error check
     int bytes_sent = send(sock, req, strlen(req), 0);
@@ -79,13 +55,79 @@ int process_request(const char *host, uint16_t port, char *resource) {
 
     // define accumulator + loop
     int bytes_received = 0;
-    int header_len, content_len;
-    while () {
+    int header_len, remaining_content_len;
+    int header_complete = 0;
+    int header_bytes = 0;
+    while (1) {
+        // receive 1024 chunk
+        bytes_received = recv(sock, recv_buff, BUFF_SZ, 0);
+        if (bytes_received <= 0) {
+            break;
+        }
 
+        if (!header_complete) {
+            
+            if (header_bytes + bytes_received > current_header_sz) {
+                int new_sz = current_header_sz ? current_header_sz + 1024 : 1024;
+                while (new_sz < header_bytes + bytes_received) {
+                    new_sz += 1024;
+                }
+
+                char *tmp = (char*)realloc(header_buff, new_sz);
+                if (!tmp) { 
+                    printf("[ERROR] Problem allocating memory for header. Quitting...\n");
+                    break;
+                }
+                header_buff = tmp;
+                current_header_sz = new_sz;
+            }
+
+            memcpy(header_buff + header_bytes, recv_buff, bytes_received);
+            header_bytes += bytes_received;
+
+            int ok = process_http_header(header_buff, header_bytes, &header_len, &remaining_content_len);
+            if (ok == 0) {
+                header_complete = 1;
+
+                print_header(header_buff, header_len);
+
+                int body_bytes_after_header = header_bytes - header_len;
+                if (body_bytes_after_header > 0) {
+                    //print part of body after header
+                    printf("%.*s", body_bytes_after_header, header_buff + header_len);
+                    
+                    if (remaining_content_len >= 0) {
+                        remaining_content_len -= body_bytes_after_header;
+                        if (remaining_content_len <= 0) {
+                            break;
+                        }
+                    }
+                }
+
+            } else {
+                continue;
+            }
+
+        } else {
+            // we are past the header now
+            if (remaining_content_len > 0) {
+                printf("%.*s", bytes_received, recv_buff);
+                remaining_content_len -= bytes_received;
+                if (remaining_content_len == 0) { 
+                    printf("\n"); 
+                    break; 
+                }
+            } else {
+                printf("%.*s\n", bytes_received, recv_buff);
+                break;
+            }
+        }
+
+        total_bytes += bytes_received;
     }
 
-
     close(sock);
+    free(header_buff);
     return total_bytes;
 }
 
