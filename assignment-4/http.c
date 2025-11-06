@@ -103,7 +103,7 @@ int socket_connect(const char *host, uint16_t port) {
 // 
 //  int get_http_header_len(http_buff, http_buff_len) is a function that will return the header length
 //  of an http response placed at the beginning of a char buffer (http_buff) of length http_buff_len, 
-//  whose end is denoted '\n\r\n\r' (HTTP_HEADER_END). It starts with defining a char pointer (end_ptr)
+//  whose end is denoted '\r\n\r\n' (HTTP_HEADER_END). It starts with defining a char pointer (end_ptr)
 //  that will eventually point to the first occurrence of HTTP_HEADER_END. Then we call strnstr and set
 //  the return value of it to end_ptr, giving strnstr our http_buff (our haystack), HTTP_HEADER_END (our needle) 
 //  and http_buff_len (the size of the haystack). At every pass in that function, we look at the first character
@@ -147,30 +147,30 @@ int get_http_header_len(char *http_buff, int http_buff_len) {
 //  lies and then add one to account for the space. Then we can parse the remaining string into atoi() which will convert our ascii
 //  string version of a number into an actual integer. We then return this number and find the value of our 'Content-Length' field.
 int get_http_content_len(char *http_buff, int http_header_len) {
-    char header_line[MAX_HEADER_LINE];
+    char header_line[MAX_HEADER_LINE];                                              // make our temp line buffer
 
-    char *next_header_line = http_buff;
-    char *end_header_buff = http_buff + http_header_len;
+    char *next_header_line = http_buff;                                             // start our temp line at the start of http_buff
+    char *end_header_buff = http_buff + http_header_len;                            // find the end of http_buff for our loop condition
 
-    while (next_header_line < end_header_buff) {
-        bzero(header_line, sizeof(header_line));
-        sscanf(next_header_line, "%[^\r\n]s", header_line);
+    while (next_header_line < end_header_buff) {                                    // until we reach the end of our http_buff, keep looping and updating header_line
+        bzero(header_line, sizeof(header_line));                                    // reset all values of header_line to zero so any garbage in that memory doesn't interfere with current read
+        sscanf(next_header_line, "%[^\r\n]s", header_line);                         // put every character into header_line from http_buff starting at next_header_line until we reach '\r\n'
 
-        int isCLHeader2 = strcasecmp(header_line, CL_HEADER);
-        char *isCLHeader = strcasestr(header_line, CL_HEADER);
-        if(isCLHeader != NULL) {
-            char *header_value_start = strchr(header_line, HTTP_HEADER_DELIM);
+        int isCLHeader2 = strcasecmp(header_line, CL_HEADER);                       // this is a good check but we don't use it here
+        char *isCLHeader = strcasestr(header_line, CL_HEADER);                      // here we look for a case insensitive match of our CL_HEADER inside of header_line
+        if(isCLHeader != NULL) {                                                    // if we have a match, we continue    
+            char *header_value_start = strchr(header_line, HTTP_HEADER_DELIM);      // fast-forward our pointer to after our delimiter
             if (header_value_start != NULL) {
-                char *header_value = header_value_start + 1;
-                int content_len = atoi(header_value);
-                return content_len;
+                char *header_value = header_value_start + 1;                        // add one more to our pointer to account for the SP char after the HTTP_HEADER_DELIM
+                int content_len = atoi(header_value);                               // convert the rest of our header into an integer from ascii characters
+                return content_len;                                                 // return the number we read and converted
             }
         }
-        next_header_line += strlen(header_line) + strlen(HTTP_HEADER_EOL);
-    }
-    fprintf(stderr,"Did not find content length\n");
-    return 0;
-}
+        next_header_line += strlen(header_line) + strlen(HTTP_HEADER_EOL);          // if we haven't found a match in our current header_line, then we fast-forward our
+    }                                                                               //      http_buff reference pointer to after our current header line length plus the 
+    fprintf(stderr,"Did not find content length\n");                                //      length of the end of line characters so that our next header_line we copy in
+    return 0;                                                                       //      is truly the start of a new line in our http_buff
+}                                                                                   // we also return 0 if we found no matches period so the rest of our code can infer we don't have a Content-Length field so the length is 0
 
 void print_header(char *http_buff, int http_header_len) {
     fprintf(stdout, "%.*s\n", http_header_len,http_buff);
@@ -208,16 +208,16 @@ void print_header(char *http_buff, int http_header_len) {
 int contains_object(char* http_buff, int* l, int* r) {
     char win[15];
 
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 14; i++) {                                              // copy characters from http_buff into our temp window for evaluation (between l and r inclusive)
         win[i] = http_buff[i+*l];
     }
     win[15] = '\0';
 
-    if (strcmp(CL_HEADER, win) == 0) {
+    if (strcmp(CL_HEADER, win) == 0) {                                          // 14 character with a null terminator will fit CL_HEADER exactly if we match
         return 1;
     }
 
-    char* found_ptr = strnstr(win, HTTP_HEADER_END, sizeof(HTTP_HEADER_END));
+    char* found_ptr = strnstr(win, HTTP_HEADER_END, sizeof(HTTP_HEADER_END));   // otherwise we use needle in haystack algorithm to look for HTTP_HEADER_END in our window
     if (found_ptr != NULL) {
         ptrdiff_t off = found_ptr - win;
         *l += (int)off;
@@ -239,10 +239,10 @@ int process_http_header(char* http_buff, int http_buff_len, int* header_len, int
     int contains_obj;
     int l = 0, r = 13;
     int f_CL_HEADER = 0, f_HTTP_HEADER_END = 0;
-    while (r < http_buff_len) {
+    while (r < http_buff_len) {                                         // make sure our right index pointer doesn't reach the end of our buffer
 
-        contains_obj = contains_object(http_buff, &l, &r);
-        if (contains_obj == -1) {
+        contains_obj = contains_object(http_buff, &l, &r);              // we see if our current characters between l and r (inclusive) contain a CL_HEADER, HTTP_HEADER_END or nothing
+        if (contains_obj == -1) {                                       // if we found nothing, no need for extra time-wasting checks, we just advance our window and continue
             l++;
             r++;
             continue;
@@ -251,31 +251,32 @@ int process_http_header(char* http_buff, int http_buff_len, int* header_len, int
         // we found CL_HEADER
         if (contains_obj == 1) {
             f_CL_HEADER = 1;
-            char dig_str[24];
+            char dig_str[24];                                           // arbitrarily setting the content-length string to 23 + null term. characters long
 
             int idx = 0;
             while (idx < 24) {
-                if (http_buff[l+strlen(CL_HEADER)+idx] == '\n') {
+                if (http_buff[l+strlen(CL_HEADER)+idx] == '\n') {       // if we read all of our digits, null terminate and exit loop
                     dig_str[idx] = '\0';
                     break;
                 }
 
-                dig_str[idx] = http_buff[l+strlen(CL_HEADER)+2+idx];
+                dig_str[idx] = http_buff[l+strlen(CL_HEADER)+2+idx];    // add new digit to the dig_str array. (+2 is to account for DELIM and SP)
                 idx++;
             }
 
-            *content_len = atoi(dig_str);
+            *content_len = atoi(dig_str);                               // we convert our content length to a number and set the value of the dereferenced pointer
         }
         
         // we found HTTP_HEADER_END
         if (contains_obj == 2) {
             f_HTTP_HEADER_END = 1;
-            *header_len = l + strlen(HTTP_HEADER_END);
+            *header_len = l + strlen(HTTP_HEADER_END);                  // we already know the position of l after this, so we just add the length of the '\r\n\r\n'
         }
 
         l++;
         r++;
 
+        // in our loop, we expect to find both a CL_HEADER and HTTP_HEADER_END at some point, so we quit when we find both to save time
         if (f_CL_HEADER && f_HTTP_HEADER_END) {
             return 0;
         }
