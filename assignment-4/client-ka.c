@@ -5,13 +5,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 
 #define  BUFF_SZ            1024
 #define  MAX_REOPEN_TRIES   5
 
 char recv_buff[BUFF_SZ];
 
-char *generate_cc_request(const char *host, int port, const char *path){
+char *generate_cc_request(const char *host, int port, const char *path) {
 	static char req[512] = {0};
 	int offset = 0;
 	
@@ -26,7 +27,7 @@ char *generate_cc_request(const char *host, int port, const char *path){
 }
 
 
-void print_usage(char *exe_name){
+void print_usage(char *exe_name) {
     fprintf(stderr, "Usage: %s <hostname> <port> <path...>\n", exe_name);
     fprintf(stderr, "Using default host %s, port %d  and path [\\]\n", DEFAULT_HOST, DEFAULT_PORT); 
 }
@@ -95,7 +96,7 @@ int submit_request(int sock, const char *host, uint16_t port, char *resource) {
 
     int header_len, content_len;
 
-    int ok_header = process_http_header(recv_buff, sizeof(recv_buff), &header_len, &content_len);
+    int ok_header = process_http_header(recv_buff, bytes_recvd, &header_len, &content_len);
     if (header_len == 0 || ok_header < 0) {
         close(sock);
         return -1;
@@ -127,9 +128,14 @@ int submit_request(int sock, const char *host, uint16_t port, char *resource) {
     int initial_data =  bytes_recvd - header_len;
     int bytes_remaining = content_len - initial_data;
 
+    if (initial_data > 0) {
+        fprintf(stdout, "%.*s", (int)initial_data, recv_buff + header_len);
+        total_bytes += initial_data;
+    }
+
     while (bytes_remaining > 0) {
 
-        bytes_recvd = recv(sock, recv_buff, sizeof(recv_buff), 0);
+        bytes_recvd = recv(sock, recv_buff, bytes_recvd, 0);
         if (bytes_recvd < 0) {
             printf("no socket\n");
             close(sock);
@@ -138,10 +144,9 @@ int submit_request(int sock, const char *host, uint16_t port, char *resource) {
 
         fprintf(stdout, "%.*s", bytes_recvd, recv_buff);
         total_bytes += bytes_recvd;
-        fprintf(stdout, "remaining %d, received %d\n", bytes_remaining, bytes_recvd);
+        // fprintf(stdout, "remaining %d, received %d\n", bytes_remaining, bytes_recvd);
         bytes_remaining -= bytes_recvd;
     }
-    fprintf(stdout, "%.*s", bytes_recvd, recv_buff);
 
     fprintf(stdout, "\n\nOK\n");
     fprintf(stdout, "TOTAL BYTES: %d\n", total_bytes);
@@ -169,7 +174,7 @@ int submit_request(int sock, const char *host, uint16_t port, char *resource) {
     return sock;
 }
 
-int main(int argc, char *argv[]) {
+int real_main(int argc, char *argv[]) {
     int sock;
 
     const char *host = DEFAULT_HOST;
@@ -203,4 +208,21 @@ int main(int argc, char *argv[]) {
     }
 
     server_disconnect(sock);
+}
+
+static void afterRun(int exitCode, const struct timespec *t0, const struct timespec *t1)
+{
+    double ms = (t1->tv_sec - t0->tv_sec) * 1000.0 + (t1->tv_nsec - t0->tv_nsec) / 1e6;
+
+    fprintf(stderr, "\n--- Run Time ---\n");
+    fprintf(stderr, "Elapsed: %.3f ms\n", ms);
+}
+
+int main(int argc, char *argv[]) {
+    struct timespec t0, t1;
+    timespec_get(&t0, TIME_UTC);
+    int rc = real_main(argc, argv);
+    timespec_get(&t1, TIME_UTC);
+    afterRun(rc, &t0, &t1);
+    return rc;
 }

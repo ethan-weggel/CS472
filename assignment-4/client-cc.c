@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 
 #define  BUFF_SZ 1024
 
@@ -131,7 +132,7 @@ int process_request(const char *host, uint16_t port, char *resource) {
     return total_bytes;
 }
 
-int main(int argc, char *argv[]) {
+int real_main(int argc, char *argv[]) {
     int sock;
 
     const char *host = DEFAULT_HOST;
@@ -161,4 +162,21 @@ int main(int argc, char *argv[]) {
             process_request(host, port, resource);
         }
     }
+}
+
+static void afterRun(int exitCode, const struct timespec *t0, const struct timespec *t1)
+{
+    double ms = (t1->tv_sec - t0->tv_sec) * 1000.0 + (t1->tv_nsec - t0->tv_nsec) / 1e6;
+
+    fprintf(stderr, "\n--- Run Time ---\n");
+    fprintf(stderr, "Elapsed: %.3f ms\n", ms);
+}
+
+int main(int argc, char *argv[]) {
+    struct timespec t0, t1;
+    timespec_get(&t0, TIME_UTC);
+    int rc = real_main(argc, argv);
+    timespec_get(&t1, TIME_UTC);
+    afterRun(rc, &t0, &t1);
+    return rc;
 }

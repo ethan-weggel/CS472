@@ -1,0 +1,49 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Connection: Closed
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Trial 1
+--- Run Time ---
+Elapsed: 35685.931 ms
+
+Trial 2
+--- Run Time ---
+Elapsed: 33285.347 ms
+
+Trial 3
+--- Run Time ---
+Elapsed: 37239.691 ms
+
+Trial 4
+--- Run Time ---
+Elapsed: 24421.648 ms
+
+Trial 5
+--- Run Time ---
+Elapsed: 37584.640 ms
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Connection: Keep-Alive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Trial 1
+--- Run Time ---
+Elapsed: 31050.917 ms
+
+Trial 2
+--- Run Time ---
+Elapsed: 2966.378 ms
+
+Trial 3
+--- Run Time ---
+Elapsed: 3660.563 ms
+
+Trial 4
+--- Run Time ---
+Elapsed: 16366.626 ms
+
+Trial 5
+--- Run Time ---
+Elapsed: 23744.834 ms
+
+Keep-Alive Average: 
