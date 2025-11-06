@@ -162,6 +162,7 @@ int real_main(int argc, char *argv[]) {
             process_request(host, port, resource);
         }
     }
+    return 0;
 }
 
 static void afterRun(int exitCode, const struct timespec *t0, const struct timespec *t1)

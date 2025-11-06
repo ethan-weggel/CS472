@@ -1,26 +1,28 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Connection: Closed
+Connection: Close
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Trial 1
 --- Run Time ---
-Elapsed: 35685.931 ms
+Elapsed: 23289.518 ms
 
 Trial 2
 --- Run Time ---
-Elapsed: 33285.347 ms
+Elapsed: 29974.359 ms
 
 Trial 3
 --- Run Time ---
-Elapsed: 37239.691 ms
+Elapsed: 29505.447 ms
 
 Trial 4
 --- Run Time ---
-Elapsed: 24421.648 ms
+Elapsed: 27913.975 ms
 
 Trial 5
 --- Run Time ---
-Elapsed: 37584.640 ms
+Elapsed: 25244.858 ms
+
+Closed Average: 27185.6314 ms = 27.19 s
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Connection: Keep-Alive
@@ -28,22 +30,30 @@ Connection: Keep-Alive
 
 Trial 1
 --- Run Time ---
-Elapsed: 31050.917 ms
+Elapsed: 10133.437 ms
 
 Trial 2
 --- Run Time ---
-Elapsed: 2966.378 ms
+Elapsed: 17607.795 ms
 
 Trial 3
 --- Run Time ---
-Elapsed: 3660.563 ms
+Elapsed: 12450.542 ms
 
 Trial 4
 --- Run Time ---
-Elapsed: 16366.626 ms
+Elapsed: 13964.493 ms
 
 Trial 5
 --- Run Time ---
-Elapsed: 23744.834 ms
+Elapsed: 16413.431 ms
 
-Keep-Alive Average: 
+Keep-Alive Average: 14113.9396 ms = 14.11 s
+
+
+FINDINGS:
+After repeated runs, Keep-Alive averaged 14.11 seconds and Close-Connection averaged 27.19 seconds which gains us a speed-up factor of about 1.93. This is pretty significant all things considered.
+
+This improvement is expected because Keep-Alive avoids repeated TCP handshakes which takes time and more overhead per http query. Keep-Alive also reuses the congestion window. The absolute times of each trial were high but this is due to surrounding console/IO handling as well as other processing loops in the background. The relative improvement of Close to Keep-Alive are still relevant though. 
+
+At its core, HTTP/1.1 has default persistent connections with a Keep-Alive style client which means we do not need to do a repeated three-way handshake and teardown for every request, but either a client or a server can close this connection at any time. This means our KA client needs to be able to accommodate this and setup a new connection with our http server on our socket. A Close-Connection client *does* need to do this three-way handshake and tear down with every request. So even though our server might cut us off in the middle of or between requests on our Keep-Alive version, this still is faster than our Close-Connection version with repeated handshakes and other overhead.
