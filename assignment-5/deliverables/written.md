@@ -299,3 +299,40 @@
 ---
 ### PART TWO
 ---
+
+I used a 3 sub-layers for various parts of transport model. If you look at dpsend() and dprecv(), each one of these is supported by two additional helper functions. For example dpsend() with dpsenddgram() and dpsendraw(). The same model is used by dprecv(). What are the specific responsibilities of these layers? Do you think this is a good design? If so, why. If not, how can it be improved?
+
+**SEND LAYER(S) RESPONSIBILITY BREAKDOWN:**
+
+dpsendraw()     - This function is responsible for using the sendto() function to actually send the data from our send buffer to the correct address
+
+dpsenddgram()   - This function is responsible for setting up the send buffer for dpsendraw() and handles acknowledgements
+
+dpsend()        - This function checks that we are able to send our whole datagram based on buffer size and then calls dpsenddgram()
+
+
+**RECEIVE LAYER(S) RESPONSIBILITY BREAKDOWN:**
+
+dprecvraw()     - This function is responsible for using the recvfrom() function to actually receive the data into our receive buffer from the correct address
+
+dprecvdgram()   - This function is responsible for calling dprecvraw() and handling different message types as well as acknowledgements
+
+dprecv()        - This function is responsible for calling dprecvdgram() and then checks to make sure our connection
+is or isn't closed, then copies any payload data to our receive buffer
+
+I think that this is a good design, breaking it into three separate layers. The raw layer is responsible only for actually receiving the data and writing it to a buffer, the datagram layer is responsible for making sure we send or receive but handles some higher level transformations of message types and acknowledgements and some error handling. The highest level is responsible for providing some high level error checks and is a good clean interface for handling the middle layer calls. I wouldn't make any changes primarily because the function calls made are abstracting away complications and the relevant calls are all similar to that layer's level of abstraction (i.e. the lowest level 'raw' layer makes syscalls and the highest level calls our middleware). The error messages are also relevant to the functions being called at that level (i.e. it wouldn't make sense for the highest or middle layer to report a syscall error, etc). 
+
+---
+### PART THREE
+---
+Describe how sequence numbers are used in the du-proto? Why do you think we update the sequence number for things that must be acknowledged (aka ACK response)?
+
+Sequence numbers are used in du-proto, at a high level, function as one would expect sequence numbers to behave. They signify that the sender or receiver have received all bytes up to the given ACK. However, the way we pass sequence numbers around keeps things modular. Here we keep track of the current sequence number on either side of the UDP 'connection' in the dp_connection struct. Then whenever we send a message, we take that current number and place a copy of it in the dp_pdu that we intend to send out to the opposite side. 
+
+We update the sequence number for things that must be acknowledged like ACK responses because in the du-proto we are adding some bits of reliability on top of UDP which is inherently unreliable. We are able to match the ACK to the exact pdu that it is acknowledging and we are tracking exactly how much the receiver has consumed. Because we know what to expect, we can rule out duplicates or resends that we do not need or out of order datagrams which UDP can do sometimes.
+
+---
+### PART FOUR
+---
+
+
