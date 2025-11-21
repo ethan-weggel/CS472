@@ -176,7 +176,15 @@ dp_connp dpClientInit(char *addr, int port) {
 }
 
 /*
-* 
+* int dprecv(dp_connp dp, void *buff, int buff_sz) takes a pointer to a dp_connection, a pointer to a buffer
+* and a size of that buffer. The function starts by declaring a new pointer to a dp_pdu and then serves as a
+* wrapper for calling dprecvdgram(). We pass our pointer to our dp_connection, our global buffer for writing 
+* data '_dpBuffer' and the size of that buffer. This returns the number of bytes we received. If we received
+* DP_CONNECTION_CLOSED as a result of dprecvdgram() then we return the same code. If this is not the case then
+* we set the pointer to our dp_pdu to the beginning of our _dpBuffer which we wrote to. This points inPdu to the beginning
+* of the received dp_pdu. If our receive size is larger than the size of our pdu, then we know that we have a payload on the
+* other side of the pdu so we write that to our buffer that we pass in to our function. Finally, we return the 
+* full datagram size.
 */
 int dprecv(dp_connp dp, void *buff, int buff_sz){
 
@@ -193,7 +201,24 @@ int dprecv(dp_connp dp, void *buff, int buff_sz){
     return inPdu->dgram_sz;
 }
 
-
+/*
+* static int dprecvdgram(dp_connp dp, void *buff, int buff_sz) takes a pointer to a dp_connection
+* a pointer to a buffer and a buffer size. In essence, the goal of this function is to wrap our
+* call to dprecvraw(). The function starts by declaring placeholders for how many bytes we've received
+* and our error code. The function then checks to make sure the buffer size is not greater than the max size
+* of our buffer (defined by a 'magic number' constant 'DP_BUFF_OVERSIZED'); if it is, we set the error code
+* to inform the caller that the buffer we are writing to is oversized. Then we call the dprecvraw() function
+* to receive the raw data and write it to the buffer we have, returning the number of bytes received; we error
+* check and set the error code if applicable. Then we declare a new dp_pdu and copy the first part of the recv_buff
+* (we only copy however many bytes are in a dp_pdu); we check for an error again and set the error code appropriately.
+* Next we prepare the sequence number and our ACK. If we have an error, we simply increment the seq number by 1 and we are 
+* going to ACK our error. Otherwise, if the size we received was 0, this is a control message so we increment the sequence numer
+* by one. If we don't error and its not a control message (just the pdu), we increment the sequence number by what is contained in
+* inPdu.dgram_sz. After this, if we error'd on the previous step, we are going to send that error msg type and the ACK.
+* If there is an error sending this, then we RETURN an error with the protocol. Then in the last section, if we have a send message
+* type or a close message type, we simply send the appropriate messages and ACK's back to the sender rather than continue on. We 
+* then return the number of bytes we received in again.
+*/
 static int dprecvdgram(dp_connp dp, void *buff, int buff_sz){
     int bytesIn = 0;
     int errCode = DP_NO_ERROR;
@@ -270,7 +295,18 @@ static int dprecvdgram(dp_connp dp, void *buff, int buff_sz){
 }
 
 /*
-* static int dprecvraw(dp_connp dp, void *buff, int buff_sz) 
+* static int dprecvraw(dp_connp dp, void *buff, int buff_sz) takes in a pointer to a dp_connection,
+* a pointer to a buffer and the size of that buffer. We first declare an integer to keep track of how
+* many bytes we have received total. Then we see if our receive address or 'inSockAddr' is initialized,
+* if not, we error out and return. After this, we are clear to start receiving bytes, so we make the call to
+* recvfrom() where we use our binded socket address and our buffer and buffer size to receive data. We use
+* recvfrom() and not recv() because this is a connectionless communication. We want to accept the message if and
+* only if the address matches our outSockAddr (which we also specify). This returns to use the number of bytes
+* we received and we update our integer 'bytes'. We also set outSockAddr.isAddrInit state to true because if it
+* is null, then we fill that address space with that number of bytes (outSockAddr.len bytes) of the sender's address.
+* We then have some debugging code which is hardcoded to be 'off' right now, but if we set our conditional to true
+* then we will get a character pointer to our payload and then print the payload contents. Regardless of if this
+* debugging code executes, we then print the incoming pdu contents. We finally return how many bytes we received.
 */
 static int dprecvraw(dp_connp dp, void *buff, int buff_sz){
     int bytes = 0;
@@ -306,6 +342,12 @@ static int dprecvraw(dp_connp dp, void *buff, int buff_sz){
     return bytes;
 }
 
+/*
+* int dpsend(dp_connp dp, void *sbuff, int sbuff_sz) takes a pointer to a dp_connection, a pointer to a 
+* send buffer and the size of that buffer. The function starts by checking to see if our buffer size is bigger
+* than the max datagram size; if this is the case, we return an appropriate error code. Otherwise we use this
+* function as a wrapper to call dpsenddgram() and we return the number of bytes this subcall returns.
+*/
 int dpsend(dp_connp dp, void *sbuff, int sbuff_sz){
 
 
@@ -319,6 +361,23 @@ int dpsend(dp_connp dp, void *sbuff, int sbuff_sz){
     return sndSz;
 }
 
+/*
+* static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz) take a pointer to a dp_connection, a pointer
+* to our send buffer and the size of that buffer. The function starts by declaring an integer to store the 
+* number of bytes we send out. We then check to see if our outgoing address is initialized and if not we error
+* and return an error code. If we do not have an error with the address, then we check to see if the semd buffer
+* size is greater than the maximum buffer size we can send; if yes, we return an error code for a general error.
+* If we get past our error checks, we start building the pdu and the buffer. We declare a new dp_pdu and point
+* it to the start of the global buffer, _dpBuffer. We also set our send size equal to the buffer we passed in as an
+* argument to the function. We then set the message type to a general send and then the dgram_sz equal to our send size.
+* We also make sure to update this pdu's sequence to the most recently updated sequence number stored in our dp_connection.
+* Then the function will copy the send buffer to our global _dpBuffer starting after the pdu and will copy the length of
+* the send size (denoted 'sndSz'). To start an error check, we calculate the 'totalSendSz' by adding the datagram size with the 
+* size of the pdu. We then use this function as a wrapper to the dpsendraw() call; this will return how many bytes are sent. If
+* the 'bytesOut' does not equal 'totalSendSz' then we have an error message, but we continue onward in our code. We then set the values
+* of our pdu to zero so we can receive an ACK message. If we receive too few bytes to populate a pdu and our message type is not
+* a message acknowledgement we write a new error message. Then we return how many bytes we sent out, minus how many bytes our pdu took. 
+*/
 static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz){
     int bytesOut = 0;
 
@@ -363,7 +422,16 @@ static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz){
     return bytesOut - sizeof(dp_pdu);
 }
 
-
+/*
+* static int dpsendraw(dp_connp dp, void *sbuff, int sbuff_sz) takes a pointer to a dp_connection, 
+* a pointer to our send buffer and the size of that buffer. The function starts by declaring an integer
+* to hold how many bytes we've sent. Then we check to see if the outgoing address, denoted by 'outSockAddr.isAddrInit',
+* is initialized; if not, we error our and return an error code. If we are all good to go with the address, then we declare
+* a new dp_pdu pointer and set the pointer equal to the beginning of our outgoing send buffer. We then pass our socket address
+* to sendto() because we need the local address and the outgoing address since this is a connectionless communication protocol.
+* We also pass the buffer with our pdu + payload in it and send it, storing the number of bytes sent in 'bytesOut'. We then
+* print our outgoing pdu and return the number of bytes sent.
+*/
 static int dpsendraw(dp_connp dp, void *sbuff, int sbuff_sz){
     int bytesOut = 0;
     // dp_pdu *pdu = sbuff;
@@ -384,7 +452,15 @@ static int dpsendraw(dp_connp dp, void *sbuff, int sbuff_sz){
     return bytesOut;
 }
 
-
+/*
+* int dplisten(dp_connp dp) takes a pointer to a dp_connection. We declare some values for our send size and our 
+* receive size. We also then check to see if our in-address is initialized; if not, we error and return a general
+* error. Then we declare a new dp_pdu and then set all values equal to zero. We print a message indicating we are
+* trying to connect and we call dprecvraw to see if any connection is trying to be made. If we are trying to set up a 
+* 'connection' then we should only receive the number of bytes needed for a dp_pdu. If the bytes received do not equal
+* this then we error and return an error code. If we did receieve a connection pdu, then we denote this in our dp_connection
+* field 'isConnected'. We then write a message saying we are connected and then we return 'true'.
+*/
 int dplisten(dp_connp dp) {
     int sndSz, rcvSz;
 
@@ -419,6 +495,19 @@ int dplisten(dp_connp dp) {
     return true;
 }
 
+/*
+* int dpconnect(dp_connp dp) takes a pointer to a dp_connection. The function begins with declaring some integers
+* to hold our send size and receive size. We then check to see if our outgoing address 'outSockAddr' is initialized. 
+* If we are not initialized we error and return an error code. If we make it past this check then we declare a new 
+* dp_pdu and set all the values to zero. We set the message type to connection and we set the current pdu sequence number
+* equal to the most recent sequence number stored in our dp_connection. We then call dpsendraw() with our connection pdu
+* and store how many bytes we sent in 'sndSz'. If our sent bytes don't equal the size of our dp_pdu, we know there was a problem
+* so we error and return an error code. After this, we are expecting an ACK of sorts, so we call dprecvraw with our pdu to store
+* the returning message. If we received anything other than the size of our pdu, we error and return an error code. Then we also 
+* check to see if the message type was a connection acknowledgment; if it is not, we error and return an error code. If we connected
+* successfully then we increment our sequence number by one to denote a control transmission and then mark our dp_connection as
+* connected. We then return 'true'.
+*/
 int dpconnect(dp_connp dp) {
 
     int sndSz, rcvSz;
@@ -457,6 +546,19 @@ int dpconnect(dp_connp dp) {
     return true;
 }
 
+/*
+* int dpdisconnect(dp_connp dp) takes a pointer to a dp_connection. Then we declare two integers to store our
+* send size and our receive size. We then declare a new dp_pdu and intialize all of the values to zero. We 
+* set the message type to close and the pdu sequence number equal to the current sequence number stored in our
+* dp_connection. We also say the dgram size is 0 since this is just a control transmission (pdu only, no payload). 
+* We then call dpsendraw() to send our pdu and store how many bytes were sent in 'sndSz'. If 'sndSz' does not match
+* the size of out dp_pdu then we know that we did not send the full pdu and so we error and return an error code.
+* Once we know we've sent the full pdu, we then are looking for an ACK, so we switch to receive dprecvraw() with our
+* current dp_connection and our pdu. If the 'rcvSz' does not equal the size of our pdu then we know we did not receive a proper
+* acknowledgement to our close request so we error and then return an error code (same deal if the message type is not a close
+* connection acknowledgement). We then call dpclose() with our current dp_connection to free our memory. We then return an appropriate
+* return code to signify that the connection is closed.
+*/
 int dpdisconnect(dp_connp dp) {
 
     int sndSz, rcvSz;
@@ -488,6 +590,15 @@ int dpdisconnect(dp_connp dp) {
     return DP_CONNECTION_CLOSED;
 }
 
+/*
+* void * dp_prepare_send(dp_pdu *pdu_ptr, void *buff, int buff_sz) takes a pointer to a populated dp_pdu struct,
+* a pointer to our buffer and the size of the buffer. The function starts by checking to see if the buffer size if smaller
+* than the size of a pdu and if it is, then we cannot populate the buffer so we error. After this we zero-out the buffer by
+* using bzero() to turn the contents of buff for the length of our dp_pdu starting at the buff pointer. Then we copy over the 
+* contents contained in our pdu by passing the pointer of our destination (our buffer), the source (our pdu) and how much to copy
+* over (the dp_pdu size). This then returns the pointer to the buffer, plus the length of the pdu. This now means when we write to the 
+* buffer next, we will have a populated pdu prepended to the data. This pointer also tells us where to start writing.
+*/
 void * dp_prepare_send(dp_pdu *pdu_ptr, void *buff, int buff_sz) {
     if (buff_sz < sizeof(dp_pdu)) {
         perror("Expected CNTACT Message but didnt get it");
