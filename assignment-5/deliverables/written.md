@@ -335,4 +335,22 @@ We update the sequence number for things that must be acknowledged like ACK resp
 ### PART FOUR
 ---
 
+To keep things as simple as possible, the du-proto protocol requires that every send be ACKd before the next send is allowed. Can you think of at least one example of a limitation of this approach vs traditional TCP? Any insight into how this also simplified the implementation fo the du-proto protocol?
 
+One example limitation of this UDP du-proto approach of waiting for an ACK before the next send is allowed is that is dramatically reduces throughput compared to TCP. With TCP, the sliding window allows for many sends and a single ACK can account for those many sends. With this approach we need to wait for the ACK for a single send which can fluctuate on network conditions, congestion, server conditions and connection strength. 
+
+This *does* make some dramatic simplifications to this implementation, however. Considering we are waiting for an ACK before we send our next PDU + datagram, we no longer need a sliding window, our sequence numbers simply track how many bytes have been acknowledged, we don't need reassebly algorithms at play and error handling is trivial (i.e. if and ACK doesn't arrive we just retransmit a single packet and don't need to maintain multiple timers.)
+
+---
+### PART FIVE
+---
+
+We looked at how to program with TCP sockets all term. This is the first example of the UDP programming interface we looked at. Breifly describe some of the differences associated with setting up and managing UDP sockets as compared to TCP sockets.
+
+Setting up TCP connections versus a UDP one have some pretty discernable differences. With TCP, since we need a three-way handshake to set up a connection, we need to call connect(), listen() and accept() on our server to form that connection. With UDP we need no such handshake and the server simply calls bind() and we use sendto() and recvfrom(). This is far more trivial when manifest in code. 
+
+It is worth making the further distinction that since UDP does *not* form a connection we use sendto() and recvfrom() rather than send() and recv(). This ensures that we know the sender and receiver with every operation. 
+
+The other thing to mention is that TCP uses streams and UDP sends and receives exactly one datagram at a time. With UDP we have clear message boundaries and the way we receive and send things works a little different. This means that TCP's recv() might return fewer bytes than sent, more bytes combined from multiple sends and it might require more in-depth parsing to get the same level of coherence between distinct messages.
+
+---
