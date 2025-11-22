@@ -186,20 +186,32 @@ dp_connp dpClientInit(char *addr, int port) {
 * other side of the pdu so we write that to our buffer that we pass in to our function. Finally, we return the 
 * full datagram size.
 */
-int dprecv(dp_connp dp, void *buff, int buff_sz){
+int dprecv(dp_connp dp, void *buff, int buff_sz) {
 
-    dp_pdu *inPdu;
-    int rcvLen = dprecvdgram(dp, _dpBuffer, sizeof(_dpBuffer));
+    int bytes_received = 0;
+    int chunk_sz = DP_MAX_BUFF_SZ;
 
-    if(rcvLen == DP_CONNECTION_CLOSED)
-        return DP_CONNECTION_CLOSED;
+    while (chunk_sz == DP_MAX_BUFF_SZ) {
 
-    inPdu = (dp_pdu *)_dpBuffer;
-    if(rcvLen > sizeof(dp_pdu))
-        memcpy(buff, (_dpBuffer+sizeof(dp_pdu)), inPdu->dgram_sz);
+        int rcvLen = dprecvdgram(dp, _dpBuffer, sizeof(_dpBuffer));
+        if (rcvLen == DP_CONNECTION_CLOSED)
+            return DP_CONNECTION_CLOSED;
 
-    return inPdu->dgram_sz;
+        dp_pdu *inPdu = (dp_pdu *)_dpBuffer;
+        chunk_sz = inPdu->dgram_sz;
+
+        if (bytes_received + chunk_sz > buff_sz)
+            return DP_BUFF_OVERSIZED;
+
+        if (chunk_sz > 0)
+            memcpy((char*)buff + bytes_received, _dpBuffer + sizeof(dp_pdu), chunk_sz);
+
+        bytes_received += chunk_sz;
+    }
+
+    return bytes_received;
 }
+
 
 /*
 * static int dprecvdgram(dp_connp dp, void *buff, int buff_sz) takes a pointer to a dp_connection
@@ -351,12 +363,16 @@ static int dprecvraw(dp_connp dp, void *buff, int buff_sz){
 int dpsend(dp_connp dp, void *sbuff, int sbuff_sz){
 
 
-    //For now, we will not be able to send larger than the biggest datagram
-    if(sbuff_sz > dpmaxdgram()) {
-        return DP_BUFF_UNDERSIZED;
+    int sndSz;
+    int remaining_to_send = sbuff_sz;
+    while (remaining_to_send > 0) {
+        sndSz = dpsenddgram(dp, sbuff, remaining_to_send);
+        if (sndSz < 0) {
+            return sndSz;
+        }
+        remaining_to_send -= sndSz;
+        sbuff += sndSz;
     }
-
-    int sndSz = dpsenddgram(dp, sbuff, sbuff_sz);
 
     return sndSz;
 }
