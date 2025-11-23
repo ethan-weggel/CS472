@@ -24,7 +24,7 @@ static char full_file_path[FNAME_SZ];
  *  a course id, and the server looks up the course id and responds
  *  with an appropriate message. 
  */
-static int initParams(int argc, char *argv[], prog_config *cfg){
+static int initParams(int argc, char *argv[], prog_config *cfg) {
     int option;
     //setup defaults if no arguements are passed
     static char cmdBuffer[64] = {0};
@@ -77,16 +77,16 @@ int server_loop(dp_connp dpc, void *sBuff, void *rBuff, int sbuff_sz, int rbuff_
     int rcvSz;
 
     FILE *f = fopen(full_file_path, "wb+");
-    if(f == NULL){
+    if (f == NULL) {
         printf("ERROR:  Cannot open file %s\n", full_file_path);
         exit(-1);
     }
-    if (dpc->isConnected == false){
+    if (dpc->isConnected == false) {
         perror("Expecting the protocol to be in connect state, but its not");
         exit(-1);
     }
     //Loop until a disconnect is received, or error hapens
-    while(1) {
+    while (1) {
 
         //receive request from client
         rcvSz = dprecv(dpc, rBuff, rbuff_sz);
@@ -106,7 +106,7 @@ int server_loop(dp_connp dpc, void *sBuff, void *rBuff, int sbuff_sz, int rbuff_
 
 
 
-void start_client(dp_connp dpc){
+void start_client(dp_connp dpc) {
     static char sBuff[500];
 
     if(!dpc->isConnected) {
@@ -116,11 +116,11 @@ void start_client(dp_connp dpc){
 
 
     FILE *f = fopen(full_file_path, "rb");
-    if(f == NULL){
+    if (f == NULL) {
         printf("ERROR:  Cannot open file %s\n", full_file_path);
         exit(-1);
     }
-    if (dpc->isConnected == false){
+    if (dpc->isConnected == false) {
         perror("Expecting the protocol to be in connect state, but its not");
         exit(-1);
     }
@@ -139,8 +139,7 @@ void start_server(dp_connp dpc){
 }
 
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     prog_config cfg;
     int cmd;
     dp_connp dpc;
