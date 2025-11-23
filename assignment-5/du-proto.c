@@ -189,28 +189,38 @@ dp_connp dpClientInit(char *addr, int port) {
 int dprecv(dp_connp dp, void *buff, int buff_sz) {
 
     int bytes_received = 0;
-    int chunk_sz = DP_MAX_BUFF_SZ;
 
-    while (chunk_sz == DP_MAX_BUFF_SZ) {
+    while (1) {
 
         int rcvLen = dprecvdgram(dp, _dpBuffer, sizeof(_dpBuffer));
-        if (rcvLen == DP_CONNECTION_CLOSED)
+        if (rcvLen == DP_CONNECTION_CLOSED) {
             return DP_CONNECTION_CLOSED;
+        }
+        if (rcvLen < sizeof(dp_pdu)) {
+            return DP_ERROR_BAD_DGRAM;
+        }
 
         dp_pdu *inPdu = (dp_pdu *)_dpBuffer;
-        chunk_sz = inPdu->dgram_sz;
+        int chunk_sz = inPdu->dgram_sz;
 
-        if (bytes_received + chunk_sz > buff_sz)
+        if (bytes_received + chunk_sz > buff_sz) {
             return DP_BUFF_OVERSIZED;
+        }
 
-        if (chunk_sz > 0)
-            memcpy((char*)buff + bytes_received, _dpBuffer + sizeof(dp_pdu), chunk_sz);
+        memcpy((char*)buff + bytes_received, _dpBuffer + sizeof(dp_pdu), chunk_sz);
 
         bytes_received += chunk_sz;
+
+        if ((inPdu->mtype & DP_MT_FRAGMENT) == 0) {
+            break;
+        }
+
+
     }
 
     return bytes_received;
 }
+
 
 
 /*
@@ -282,7 +292,7 @@ static int dprecvdgram(dp_connp dp, void *buff, int buff_sz){
     }
 
 
-    switch(inPdu.mtype){
+    switch (inPdu.mtype & ~DP_MT_FRAGMENT) {
         case DP_MT_SND:
             outPdu.mtype = DP_MT_SNDACK;
             actSndSz = dpsendraw(dp, &outPdu, sizeof(dp_pdu));
@@ -360,18 +370,27 @@ static int dprecvraw(dp_connp dp, void *buff, int buff_sz){
 * than the max datagram size; if this is the case, we return an appropriate error code. Otherwise we use this
 * function as a wrapper to call dpsenddgram() and we return the number of bytes this subcall returns.
 */
-int dpsend(dp_connp dp, void *sbuff, int sbuff_sz){
-
+int dpsend(dp_connp dp, void *sbuff, int sbuff_sz) {
 
     int sndSz;
     int remaining_to_send = sbuff_sz;
+    int isFragment = 0;
     while (remaining_to_send > 0) {
-        sndSz = dpsenddgram(dp, sbuff, remaining_to_send);
+        int chunk = 0;
+        if (remaining_to_send > DP_MAX_BUFF_SZ) {
+            chunk = DP_MAX_BUFF_SZ;
+            isFragment = 1;
+        } else {
+            chunk = remaining_to_send;
+            isFragment = 0;
+        }
+
+        sndSz = dpsenddgram(dp, sbuff, chunk, isFragment);
         if (sndSz < 0) {
             return sndSz;
         }
-        remaining_to_send -= sndSz;
-        sbuff += sndSz;
+        remaining_to_send -= chunk;
+        sbuff += chunk;
     }
 
     return sndSz;
@@ -394,7 +413,7 @@ int dpsend(dp_connp dp, void *sbuff, int sbuff_sz){
 * of our pdu to zero so we can receive an ACK message. If we receive too few bytes to populate a pdu and our message type is not
 * a message acknowledgement we write a new error message. Then we return how many bytes we sent out, minus how many bytes our pdu took. 
 */
-static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz){
+static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz, int isFragment) {
     int bytesOut = 0;
 
     if(!dp->outSockAddr.isAddrInit) {
@@ -409,7 +428,11 @@ static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz){
     dp_pdu *outPdu = (dp_pdu *)_dpBuffer;
     int    sndSz = sbuff_sz;
     outPdu->proto_ver = DP_PROTO_VER_1;
-    outPdu->mtype = DP_MT_SND;
+    if (isFragment) {
+        outPdu->mtype = DP_MT_SND | DP_MT_FRAGMENT;
+    } else  {
+        outPdu->mtype = DP_MT_SND;
+    }
     outPdu->dgram_sz = sndSz;
     outPdu->seqnum = dp->seqNum;
 
@@ -645,7 +668,6 @@ void print_out_pdu(dp_pdu *pdu) {
 * Otherwise we print our header to signify we are RECEIVING a pdu and then call print_pdu_details to print the fields.
 */
 void print_in_pdu(dp_pdu *pdu) {
-    return;
     if (_debugMode != 1)
         return;
     printf("===> PDU DETAILS  [IN]\n");

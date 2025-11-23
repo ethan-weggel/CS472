@@ -10,8 +10,7 @@
 #include "utilities.h"
 #include "ftp-debug.h"
 
-
-#define BUFF_SZ 512
+#define BUFF_SZ (2 * DP_MAX_DGRAM_SZ)
 static char sbuffer[BUFF_SZ];
 static char rbuffer[BUFF_SZ];
 static char full_file_path[FNAME_SZ];
@@ -178,7 +177,8 @@ int server_loop(dp_connp dpc, void *sBuff, void *rBuff, int sbuff_sz, int rbuff_
 
 
 void start_client(dp_connp dpc, prog_config* cfg) {
-    static char sBuff[500];
+    static char sBuff[2 * DP_MAX_BUFF_SZ];
+
 
     if (!dpc->isConnected) {
         printf("Client not connected\n");

@@ -58,7 +58,7 @@ typedef struct dp_pdu {
     int     err_num;
 } dp_pdu;
 
-#define     DP_MAX_BUFF_SZ          512
+#define     DP_MAX_BUFF_SZ          1024
 #define     DP_MAX_DGRAM_SZ         (DP_MAX_BUFF_SZ + sizeof(dp_pdu))
 
 #define     DP_NO_ERROR             0
@@ -92,4 +92,4 @@ static void print_pdu_details(dp_pdu *pdu);
 static int dpsendraw(dp_connp dp, void *sbuff, int sbuff_sz);
 static int dprecvraw(dp_connp dp, void *buff, int buff_sz);
 static int dprecvdgram(dp_connp dp, void *buff, int buff_sz);
-static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz);
+static int dpsenddgram(dp_connp dp, void *sbuff, int sbuff_sz, int isFragment);
