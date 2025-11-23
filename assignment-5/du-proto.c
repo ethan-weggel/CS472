@@ -10,7 +10,7 @@
 #include "du-proto.h"
 
 static char _dpBuffer[DP_MAX_DGRAM_SZ];
-static int  _debugMode = 1;
+static int  _debugMode = 0;
 
 /*
 * static dp_connp dpinit() is a static function that exists only in the context of this file (du-proto.c). 
@@ -645,6 +645,7 @@ void print_out_pdu(dp_pdu *pdu) {
 * Otherwise we print our header to signify we are RECEIVING a pdu and then call print_pdu_details to print the fields.
 */
 void print_in_pdu(dp_pdu *pdu) {
+    return;
     if (_debugMode != 1)
         return;
     printf("===> PDU DETAILS  [IN]\n");

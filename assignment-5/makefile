@@ -11,8 +11,14 @@ all: du-ftp
 ./objs/du-ftp.o: du-ftp.c du-ftp.h
 	$(CC) $(CFLAGS) -c du-ftp.c -o ./objs/du-ftp.o
 
-du-ftp: ./objs/du-ftp.o ./objs/du-proto.o
-	$(CC) $(CFLAGS) ./objs/du-proto.o ./objs/du-ftp.o -o du-ftp
+./objs/utilities.o: utilities.c utilities.h
+	$(CC) $(CFLAGS) -c utilities.c -o ./objs/utilities.o
+
+./objs/ftp-debug.o: ftp-debug.c ftp-debug.h
+	$(CC) $(FLAGS) -c ftp-debug.c -o ./objs/ftp-debug.o
+
+du-ftp: ./objs/du-ftp.o ./objs/du-proto.o ./objs/utilities.o ./objs/ftp-debug.o
+	$(CC) $(CFLAGS) ./objs/du-proto.o ./objs/du-ftp.o ./objs/utilities.o ./objs/ftp-debug.o -o du-ftp
 
 run:
 	./du-ftp
