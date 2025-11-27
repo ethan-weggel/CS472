@@ -10,7 +10,7 @@
 #include "utilities.h"
 #include "ftp-debug.h"
 
-#define BUFF_SZ (4 * DP_MAX_DGRAM_SZ)
+#define BUFF_SZ (3 * DP_MAX_DGRAM_SZ)
 static char sbuffer[BUFF_SZ];
 static char rbuffer[BUFF_SZ];
 static char full_file_path[FNAME_SZ];
@@ -325,7 +325,12 @@ int main(int argc, char *argv[]) {
 
     printf("MODE %d\n", cfg.prog_mode);
     printf("PORT %d\n", cfg.port_number);
-    printf("FILE NAME: %s\n", cfg.file_name);
+
+    if (cfg.prog_mode == PROG_MD_SVR) {
+        printf("FILE NAME: ANY\n");
+    } else {
+        printf("FILE NAME: %s\n", cfg.file_name);
+    }
 
     switch (cmd) {
         case PROG_MD_CLI:
